@@ -1,0 +1,840 @@
+profile:
+  id: ADT_A04_Example
+  message_type: ADT
+  trigger_event: A04
+  hl7_version: '2.7'
+  description: Register a Patient. Used for outpatient or pre-admit registration without physical admission.
+  author: HL7 Integration Team
+  created_at: '2026-02-27'
+  updated_at: '2026-02-27'
+
+value_sets:
+  VS_PATIENT_CLASS:
+    description: Patient class codes (PV1.2) — HL7 Table 0004
+    codes:
+      - {code: E, display: Emergency}
+      - {code: I, display: Inpatient}
+      - {code: O, display: Outpatient}
+      - {code: P, display: Preadmit}
+      - {code: R, display: Recurring Patient}
+      - {code: B, display: Obstetrics}
+      - {code: C, display: Commercial Account}
+      - {code: N, display: Not Applicable}
+      - {code: U, display: Unknown}
+
+  VS_SEX:
+    description: Administrative sex codes (PID.8) — HL7 Table 0001
+    codes:
+      - {code: M, display: Male}
+      - {code: F, display: Female}
+      - {code: U, display: Unknown}
+      - {code: O, display: Other}
+      - {code: A, display: Ambiguous}
+      - {code: N, display: Not applicable}
+
+  VS_MARITAL_STATUS:
+    description: Marital status codes (PID.16) — HL7 Table 0002
+    codes:
+      - {code: S, display: Single}
+      - {code: M, display: Married}
+      - {code: D, display: Divorced}
+      - {code: W, display: Widowed}
+      - {code: C, display: Common law}
+      - {code: P, display: Domestic partner}
+      - {code: A, display: Separated}
+      - {code: U, display: Unknown}
+
+  VS_IDENTIFIER_TYPE:
+    description: Identifier type codes for CX.5 — HL7 Table 0203
+    codes:
+      - {code: MR,  display: Medical record number}
+      - {code: PI,  display: Patient internal identifier}
+      - {code: SS,  display: Social Security number}
+      - {code: DL,  display: Driver license number}
+      - {code: NI,  display: National unique individual identifier}
+      - {code: NH,  display: National Health Plan Identifier}
+      - {code: PPN, display: Passport number}
+
+  VS_ADMIT_SOURCE:
+    description: Admit source codes (PV1.14) — HL7 Table 0023
+    codes:
+      - {code: '1', display: Physician referral}
+      - {code: '2', display: Clinic referral}
+      - {code: '3', display: HMO referral}
+      - {code: '4', display: Transfer from a hospital}
+      - {code: '5', display: Transfer from a skilled nursing facility}
+      - {code: '7', display: Emergency room}
+      - {code: '8', display: Court/law enforcement}
+      - {code: '9', display: Information not available}
+
+  VS_LANGUAGE:
+    description: Language codes ISO 639-1 (PID.15)
+    codes:
+      - {code: es, display: Spanish}
+      - {code: en, display: English}
+      - {code: fr, display: French}
+      - {code: de, display: German}
+      - {code: pt, display: Portuguese}
+      - {code: ar, display: Arabic}
+      - {code: zh, display: Chinese}
+
+  VS_RACE:
+    description: Race codes (PID.10) — HL7 Table 0005
+    codes:
+      - {code: '2028-9',  display: Asian}
+      - {code: '2054-5',  display: Black or African American}
+      - {code: '2106-3',  display: White}
+      - {code: '1002-5',  display: American Indian or Alaska Native}
+      - {code: '2076-8',  display: Native Hawaiian or Other Pacific Islander}
+      - {code: '2131-1',  display: Other Race}
+      - {code: ASKU,      display: Asked but unknown}
+      - {code: UNK,       display: Unknown}
+
+  VS_ETHNIC_GROUP:
+    description: Ethnic group codes (PID.22) — HL7 Table 0189
+    codes:
+      - {code: H, display: Hispanic or Latino}
+      - {code: N, display: Not Hispanic or Latino}
+      - {code: U, display: Unknown}
+
+  VS_PROCESSING_ID:
+    description: Processing ID codes (MSH.11) — HL7 Table 0103
+    codes:
+      - {code: P, display: Production}
+      - {code: T, display: Training}
+      - {code: D, display: Debugging}
+
+  VS_NK1_RELATIONSHIP:
+    description: NK1 relationship codes (NK1.3) — HL7 Table 0063
+    codes:
+      - {code: SPO, display: Spouse}
+      - {code: MTH, display: Mother}
+      - {code: FTH, display: Father}
+      - {code: SON, display: Son}
+      - {code: DAU, display: Daughter}
+      - {code: SIB, display: Sibling}
+      - {code: GRD, display: Guardian}
+      - {code: EMC, display: Emergency contact}
+      - {code: FND, display: Friend}
+      - {code: OTH, display: Other}
+
+  VS_DIAGNOSIS_TYPE:
+    description: Diagnosis type codes (DG1.6) — HL7 Table 0052
+    codes:
+      - {code: A, display: Admitting}
+      - {code: W, display: Working}
+      - {code: F, display: Final}
+
+structure:
+  - segment: MSH
+    usage: R
+    min: 1
+    max: 1
+    description: Message Header
+    fields:
+      - seq: 3
+        name: Sending Application
+        datatype: HD
+        usage: R
+        min_length: 1
+        max_length: 227
+        description: Identifies the sending application.
+        notes: HD.1 = Namespace ID. Must match registered system identifier.
+      - seq: 4
+        name: Sending Facility
+        datatype: HD
+        usage: R
+        min_length: 1
+        max_length: 227
+        description: Sending facility identifier.
+      - seq: 5
+        name: Receiving Application
+        datatype: HD
+        usage: R
+        min_length: 1
+        max_length: 227
+        description: Receiving application identifier.
+      - seq: 6
+        name: Receiving Facility
+        datatype: HD
+        usage: R
+        min_length: 1
+        max_length: 227
+        description: Receiving facility identifier.
+      - seq: 7
+        name: Date/Time of Message
+        datatype: DTM
+        usage: R
+        min_length: 1
+        max_length: 24
+        description: Date and time the message was created.
+        notes: Format YYYYMMDDHHMMSS. DTM replaces the deprecated TS in v2.7.
+      - seq: 9
+        name: Message Type
+        datatype: MSG
+        usage: R
+        min_length: 1
+        max_length: 15
+        description: Must be ADT^A04^ADT_A01 for this message type.
+        notes: Note — v2.7 reuses the ADT_A01 message structure for A04.
+      - seq: 10
+        name: Message Control ID
+        datatype: ST
+        usage: R
+        min_length: 1
+        max_length: 199
+        description: Unique identifier for acknowledgment correlation.
+      - seq: 11
+        name: Processing ID
+        datatype: PT
+        usage: R
+        min_length: 1
+        max_length: 3
+        description: Processing mode.
+        value_set: VS_PROCESSING_ID
+      - seq: 12
+        name: Version ID
+        datatype: VID
+        usage: R
+        min_length: 1
+        max_length: 60
+        description: HL7 version. Must be 2.7 for this profile.
+
+  - segment: SFT
+    usage: O
+    min: 0
+    max: '*'
+    description: Software Segment — identifies sending software (v2.5+)
+    fields:
+      - seq: 1
+        name: Software Vendor Organization
+        datatype: XON
+        usage: R
+        min_length: 1
+        max_length: 567
+        description: Name of the software vendor organization.
+      - seq: 2
+        name: Software Certified Version or Release Number
+        datatype: ST
+        usage: R
+        min_length: 1
+        max_length: 15
+        description: Version/release number.
+      - seq: 3
+        name: Software Product Name
+        datatype: ST
+        usage: R
+        min_length: 1
+        max_length: 20
+        description: Name of the software product.
+
+  - segment: UAC
+    usage: O
+    min: 0
+    max: 1
+    description: User Authentication Credential — new in v2.7
+    fields:
+      - seq: 1
+        name: User Authentication Credential Type Code
+        datatype: CWE
+        usage: R
+        min_length: 1
+        max_length: 705
+        description: Type of authentication credential.
+      - seq: 2
+        name: User Authentication Credential
+        datatype: ED
+        usage: R
+        min_length: 1
+        max_length: 65536
+        description: The credential data (e.g. SAML token, Kerberos token).
+
+  - segment: EVN
+    usage: R
+    min: 1
+    max: 1
+    description: Event Type
+    fields:
+      - seq: 2
+        name: Recorded Date/Time
+        datatype: DTM
+        usage: R
+        min_length: 1
+        max_length: 24
+        description: Date/time the event was recorded. Format YYYYMMDDHHMMSS.
+      - seq: 3
+        name: Date/Time Planned Event
+        datatype: DTM
+        usage: O
+        min_length: 0
+        max_length: 24
+        description: Scheduled registration date (optional).
+      - seq: 5
+        name: Operator ID
+        datatype: XCN
+        usage: RE
+        min_length: 0
+        max_length: 250
+        description: User who recorded the event.
+      - seq: 6
+        name: Event Occurred
+        datatype: DTM
+        usage: RE
+        min_length: 0
+        max_length: 24
+        description: Date/time the registration event actually occurred.
+
+  - group: PATIENT
+    usage: R
+    min: 1
+    max: 1
+    description: Patient demographic group
+    segments:
+      - segment: PID
+        usage: R
+        min: 1
+        max: 1
+        description: Patient Identification
+        fields:
+          - seq: 1
+            name: Set ID
+            datatype: SI
+            usage: O
+            min_length: 1
+            max_length: 4
+            description: Always 1 for the first PID.
+          - seq: 3
+            name: Patient Identifier List
+            datatype: CX
+            usage: R
+            min_length: 1
+            max_length: 250
+            description: Primary patient identifier (MRN).
+            notes: >
+              CX.1=MRN value, CX.4=Assigning Authority (HD),
+              CX.5=identifier type (typically MR). Multiple repetitions for alternate IDs.
+            value_set: VS_IDENTIFIER_TYPE
+          - seq: 5
+            name: Patient Name
+            datatype: XPN
+            usage: R
+            min_length: 1
+            max_length: 250
+            description: Legal name of the patient.
+            notes: XPN.1=Family, XPN.2=Given, XPN.3=Middle, XPN.7=Name type code (L=Legal).
+          - seq: 6
+            name: Mother's Maiden Name
+            datatype: XPN
+            usage: O
+            min_length: 0
+            max_length: 250
+            description: Mother's maiden name.
+          - seq: 7
+            name: Date/Time of Birth
+            datatype: DTM
+            usage: RE
+            min_length: 0
+            max_length: 24
+            description: Patient date of birth. Format YYYYMMDD.
+          - seq: 8
+            name: Administrative Sex
+            datatype: IS
+            usage: RE
+            min_length: 0
+            max_length: 1
+            description: Patient administrative sex.
+            value_set: VS_SEX
+          - seq: 10
+            name: Race
+            datatype: CWE
+            usage: O
+            min_length: 0
+            max_length: 705
+            description: Patient race using HL7 Table 0005.
+            notes: CWE.1=code, CWE.2=display, CWE.3=HL70005 (coding system name).
+            value_set: VS_RACE
+          - seq: 11
+            name: Patient Address
+            datatype: XAD
+            usage: RE
+            min_length: 0
+            max_length: 250
+            description: Patient home address.
+            notes: XAD.1=street, XAD.3=city, XAD.4=state/province, XAD.5=zip, XAD.6=country.
+          - seq: 13
+            name: Phone Number - Home
+            datatype: XTN
+            usage: O
+            min_length: 0
+            max_length: 250
+            description: Patient home phone.
+          - seq: 14
+            name: Phone Number - Business
+            datatype: XTN
+            usage: O
+            min_length: 0
+            max_length: 250
+            description: Patient business phone.
+          - seq: 15
+            name: Primary Language
+            datatype: CWE
+            usage: O
+            min_length: 0
+            max_length: 705
+            description: Patient preferred language. Use ISO 639-1 codes.
+            value_set: VS_LANGUAGE
+          - seq: 16
+            name: Marital Status
+            datatype: CWE
+            usage: O
+            min_length: 0
+            max_length: 705
+            description: Patient marital status.
+            value_set: VS_MARITAL_STATUS
+          - seq: 18
+            name: Patient Account Number
+            datatype: CX
+            usage: RE
+            min_length: 0
+            max_length: 250
+            description: Visit/encounter account number.
+          - seq: 19
+            name: SSN Number - Patient
+            datatype: ST
+            usage: X
+            min_length: 0
+            max_length: 16
+            description: Not used — do not populate.
+            notes: Deprecated. Use PID.3 with CX.5=SS if SSN needed.
+          - seq: 22
+            name: Ethnic Group
+            datatype: CWE
+            usage: O
+            min_length: 0
+            max_length: 705
+            description: Patient ethnic group.
+            value_set: VS_ETHNIC_GROUP
+          - seq: 29
+            name: Patient Death Date and Time
+            datatype: DTM
+            usage: C
+            min_length: 0
+            max_length: 24
+            description: Required if PID.30 = Y.
+          - seq: 30
+            name: Patient Death Indicator
+            datatype: ID
+            usage: RE
+            min_length: 0
+            max_length: 1
+            description: Y = patient deceased, N = alive.
+
+      - segment: PD1
+        usage: O
+        min: 0
+        max: 1
+        description: Patient Additional Demographic
+        fields:
+          - seq: 3
+            name: Patient Primary Facility
+            datatype: XON
+            usage: O
+            min_length: 0
+            max_length: 250
+            description: Primary care facility.
+          - seq: 4
+            name: Patient Primary Care Provider
+            datatype: XCN
+            usage: O
+            min_length: 0
+            max_length: 250
+            description: Primary care provider (PCP).
+
+      - segment: ARV
+        usage: O
+        min: 0
+        max: '*'
+        description: Access Restriction — new in v2.7, replaces deprecated PD1 fields 12-14
+        fields:
+          - seq: 1
+            name: Set ID
+            datatype: SI
+            usage: O
+            min_length: 1
+            max_length: 4
+            description: Sequence number.
+          - seq: 2
+            name: Access Restriction Action Code
+            datatype: CNE
+            usage: R
+            min_length: 1
+            max_length: 705
+            description: Action code (ADD, DEL, UP).
+          - seq: 3
+            name: Access Restriction Value
+            datatype: CWE
+            usage: R
+            min_length: 1
+            max_length: 705
+            description: Type of restriction (e.g. VIP, staff, family).
+
+  - segment: NK1
+    usage: O
+    min: 0
+    max: '*'
+    description: Next of Kin / Associated Parties (repeating)
+    fields:
+      - seq: 1
+        name: Set ID
+        datatype: SI
+        usage: R
+        min_length: 1
+        max_length: 4
+        description: Sequence number starting at 1.
+      - seq: 2
+        name: NK Name
+        datatype: XPN
+        usage: RE
+        min_length: 0
+        max_length: 250
+        description: Name of the next of kin / associated party.
+      - seq: 3
+        name: Relationship
+        datatype: CWE
+        usage: RE
+        min_length: 0
+        max_length: 705
+        description: Relationship of NK to patient.
+        value_set: VS_NK1_RELATIONSHIP
+      - seq: 4
+        name: Address
+        datatype: XAD
+        usage: O
+        min_length: 0
+        max_length: 250
+        description: NK address.
+      - seq: 5
+        name: Phone Number
+        datatype: XTN
+        usage: O
+        min_length: 0
+        max_length: 250
+        description: NK phone number.
+
+  - group: PATIENT_VISIT
+    usage: R
+    min: 1
+    max: 1
+    description: Patient visit information
+    segments:
+      - segment: PV1
+        usage: R
+        min: 1
+        max: 1
+        description: Patient Visit
+        fields:
+          - seq: 2
+            name: Patient Class
+            datatype: IS
+            usage: R
+            min_length: 1
+            max_length: 1
+            description: Visit patient class (typically O=Outpatient for A04).
+            value_set: VS_PATIENT_CLASS
+          - seq: 3
+            name: Assigned Patient Location
+            datatype: PL
+            usage: RE
+            min_length: 0
+            max_length: 80
+            description: Outpatient clinic/location.
+            notes: PL.1=Point of Care (clinic/unit), PL.2=Room, PL.3=Bed, PL.4=Facility.
+          - seq: 7
+            name: Attending Doctor
+            datatype: XCN
+            usage: RE
+            min_length: 0
+            max_length: 250
+            description: Attending physician.
+          - seq: 8
+            name: Referring Doctor
+            datatype: XCN
+            usage: O
+            min_length: 0
+            max_length: 250
+            description: Referring physician.
+          - seq: 14
+            name: Admit Source
+            datatype: IS
+            usage: O
+            min_length: 0
+            max_length: 6
+            description: Source of the registration.
+            value_set: VS_ADMIT_SOURCE
+          - seq: 19
+            name: Visit Number
+            datatype: CX
+            usage: RE
+            min_length: 0
+            max_length: 250
+            description: Unique visit/encounter identifier.
+            notes: CX.1=visit number, CX.4=assigning authority.
+          - seq: 44
+            name: Admit Date/Time
+            datatype: DTM
+            usage: R
+            min_length: 1
+            max_length: 24
+            description: Date/time of patient registration. Format YYYYMMDDHHMMSS.
+
+      - segment: PV2
+        usage: O
+        min: 0
+        max: 1
+        description: Patient Visit - Additional Information
+        fields:
+          - seq: 3
+            name: Admit Reason
+            datatype: CWE
+            usage: O
+            min_length: 0
+            max_length: 705
+            description: Reason for registration/visit.
+          - seq: 38
+            name: Mode of Arrival Code
+            datatype: CWE
+            usage: O
+            min_length: 0
+            max_length: 705
+            description: How the patient arrived.
+
+  - segment: OBX
+    usage: O
+    min: 0
+    max: '*'
+    description: Observation/Result — clinical observations at registration
+    fields:
+      - seq: 1
+        name: Set ID
+        datatype: SI
+        usage: R
+        min_length: 1
+        max_length: 4
+        description: Sequence number.
+      - seq: 2
+        name: Value Type
+        datatype: ID
+        usage: R
+        min_length: 1
+        max_length: 3
+        description: Data type of OBX.5 (NM, ST, CWE, DT...).
+      - seq: 3
+        name: Observation Identifier
+        datatype: CWE
+        usage: R
+        min_length: 1
+        max_length: 705
+        description: LOINC or local code identifying the observation.
+      - seq: 5
+        name: Observation Value
+        datatype: ST
+        usage: RE
+        min_length: 0
+        max_length: 99999
+        description: The observation value.
+      - seq: 11
+        name: Observation Result Status
+        datatype: ID
+        usage: R
+        min_length: 1
+        max_length: 1
+        description: F=Final, P=Preliminary, C=Correction, X=Cannot be obtained.
+
+  - segment: AL1
+    usage: O
+    min: 0
+    max: '*'
+    description: Patient Allergy Information (repeating)
+    fields:
+      - seq: 1
+        name: Set ID
+        datatype: SI
+        usage: R
+        min_length: 1
+        max_length: 4
+        description: Sequence number starting at 1.
+      - seq: 2
+        name: Allergen Type Code
+        datatype: CWE
+        usage: O
+        min_length: 0
+        max_length: 705
+        description: DA=Drug allergy, FA=Food allergy, EA=Environmental allergy.
+      - seq: 3
+        name: Allergen Code/Mnemonic/Description
+        datatype: CWE
+        usage: R
+        min_length: 1
+        max_length: 705
+        description: The substance causing the allergy.
+      - seq: 4
+        name: Allergy Severity Code
+        datatype: CWE
+        usage: O
+        min_length: 0
+        max_length: 705
+        description: SV=Severe, MO=Moderate, MI=Mild, U=Unknown.
+      - seq: 5
+        name: Allergy Reaction Code
+        datatype: ST
+        usage: O
+        min_length: 0
+        max_length: 15
+        description: Observed reaction description (e.g. Rash, Anaphylaxis).
+
+  - segment: DG1
+    usage: O
+    min: 0
+    max: '*'
+    description: Diagnosis (repeating)
+    fields:
+      - seq: 1
+        name: Set ID
+        datatype: SI
+        usage: R
+        min_length: 1
+        max_length: 4
+        description: Sequence number starting at 1.
+      - seq: 3
+        name: Diagnosis Code
+        datatype: CWE
+        usage: RE
+        min_length: 0
+        max_length: 705
+        description: ICD-10-CM code. CWE.1=code, CWE.2=display, CWE.3=I10.
+      - seq: 5
+        name: Diagnosis Date/Time
+        datatype: DTM
+        usage: O
+        min_length: 0
+        max_length: 24
+        description: Date/time of the diagnosis.
+      - seq: 6
+        name: Diagnosis Type
+        datatype: IS
+        usage: R
+        min_length: 1
+        max_length: 2
+        description: Type of diagnosis.
+        value_set: VS_DIAGNOSIS_TYPE
+
+  - segment: GT1
+    usage: O
+    min: 0
+    max: '*'
+    description: Guarantor (repeating)
+    fields:
+      - seq: 1
+        name: Set ID
+        datatype: SI
+        usage: R
+        min_length: 1
+        max_length: 4
+        description: Sequence number.
+      - seq: 3
+        name: Guarantor Name
+        datatype: XPN
+        usage: R
+        min_length: 1
+        max_length: 250
+        description: Name of the guarantor.
+      - seq: 5
+        name: Guarantor Address
+        datatype: XAD
+        usage: O
+        min_length: 0
+        max_length: 250
+        description: Guarantor address.
+      - seq: 6
+        name: Guarantor Phone Number - Home
+        datatype: XTN
+        usage: O
+        min_length: 0
+        max_length: 250
+        description: Guarantor home phone.
+
+  - group: INSURANCE
+    usage: O
+    min: 0
+    max: '*'
+    description: Insurance group (one per insurance plan)
+    segments:
+      - segment: IN1
+        usage: R
+        min: 1
+        max: 1
+        description: Insurance
+        fields:
+          - seq: 1
+            name: Set ID
+            datatype: SI
+            usage: R
+            min_length: 1
+            max_length: 4
+            description: Sequence number starting at 1.
+          - seq: 2
+            name: Insurance Plan ID
+            datatype: CWE
+            usage: R
+            min_length: 1
+            max_length: 705
+            description: Insurance plan identifier.
+          - seq: 3
+            name: Insurance Company ID
+            datatype: CX
+            usage: R
+            min_length: 1
+            max_length: 250
+            description: Insurance company identifier.
+          - seq: 4
+            name: Insurance Company Name
+            datatype: XON
+            usage: RE
+            min_length: 0
+            max_length: 250
+            description: Name of the insurance company.
+          - seq: 16
+            name: Name of Insured
+            datatype: XPN
+            usage: RE
+            min_length: 0
+            max_length: 250
+            description: Name of the primary insured (if different from patient).
+          - seq: 36
+            name: Policy Number
+            datatype: ST
+            usage: RE
+            min_length: 0
+            max_length: 15
+            description: Policy number of the insured.
+          - seq: 46
+            name: Group Number
+            datatype: ST
+            usage: O
+            min_length: 0
+            max_length: 12
+            description: Insurance group number.
+
+      - segment: IN2
+        usage: O
+        min: 0
+        max: 1
+        description: Insurance Additional Information
+        fields: []
+
+      - segment: IN3
+        usage: O
+        min: 0
+        max: 1
+        description: Insurance Additional Information, Certification
+        fields: []

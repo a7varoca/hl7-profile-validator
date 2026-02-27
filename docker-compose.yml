@@ -1,0 +1,9 @@
+services:
+  command-validator:
+    build: .
+    container_name: command-validator
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./profiles:/app/profiles
+    restart: unless-stopped

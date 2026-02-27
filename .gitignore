@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+.env
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Docker
+.dockerignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Profiles — commit only examples, not sensitive company profiles
+# Uncomment the next line to exclude all profiles from version control:
+# profiles/*.yaml
+# profiles/!*Example*.yaml

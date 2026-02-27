@@ -1,0 +1,82 @@
+SEGMENTS: dict[str, str] = {
+    # --- Core ---
+    "MSH": "Message Header",
+    "SFT": "Software Segment",
+    "UAC": "User Authentication Credential",
+    "MSA": "Message Acknowledgment",
+    "ERR": "Error",
+    "NTE": "Notes and Comments",
+    # --- Patient ---
+    "PID": "Patient Identification",
+    "PD1": "Patient Additional Demographic",
+    "ARV": "Access Restriction",
+    "ROL": "Role",
+    "NK1": "Next of Kin / Associated Parties",
+    "MRG": "Merge Patient Information",
+    "DB1": "Disability",
+    # --- Visit ---
+    "PV1": "Patient Visit",
+    "PV2": "Patient Visit - Additional Information",
+    "EVN": "Event Type",
+    # --- Clinical ---
+    "OBX": "Observation/Result",
+    "OBR": "Observation Request",
+    "ORC": "Common Order",
+    "AL1": "Patient Allergy Information",
+    "DG1": "Diagnosis",
+    "DRG": "Diagnosis Related Group",
+    "PR1": "Procedures",
+    "ACC": "Accident",
+    "TXA": "Transcription Document Header",
+    # --- Orders ---
+    "RXO": "Pharmacy/Treatment Order",
+    "RXR": "Pharmacy/Treatment Route",
+    "RXC": "Pharmacy/Treatment Component Order",
+    "RXE": "Pharmacy/Treatment Encoded Order",
+    "RXD": "Pharmacy/Treatment Dispense",
+    "RXG": "Pharmacy/Treatment Give",
+    "RXA": "Pharmacy/Treatment Administration",
+    # --- Insurance ---
+    "GT1": "Guarantor",
+    "IN1": "Insurance",
+    "IN2": "Insurance Additional Information",
+    "IN3": "Insurance Additional Information, Certification",
+    "UB1": "Universal Bill Information",
+    "UB2": "Universal Bill 92 Information",
+    # --- Scheduling ---
+    "SCH": "Scheduling Activity Information",
+    "AIS": "Appointment Information",
+    "AIG": "Appointment Information - General Resource",
+    "AIL": "Appointment Information - Location Resource",
+    "AIP": "Appointment Information - Personnel Resource",
+    # --- Master Files ---
+    "MFI": "Master File Identification",
+    "MFE": "Master File Entry",
+    "STF": "Staff Identification",
+    # --- Lab / Specimens ---
+    "SPM": "Specimen",
+    "SAC": "Specimen Container Detail",
+    "OBX": "Observation/Result",
+    "TCD": "Test Code Detail",
+    # --- Query ---
+    "QRD": "Query Definition (deprecated)",
+    "QRF": "Query Filter (deprecated)",
+    "QPD": "Query Parameter Definition",
+    "QAK": "Query Acknowledgment",
+    "RSP": "Response",
+    # --- Segments for pathology/documents ---
+    "PRD": "Provider Data",
+    "CTD": "Contact Data",
+    "LOC": "Location Identification",
+    "LCH": "Location Characteristic",
+    "LRL": "Location Relationship",
+    "LDP": "Location Department",
+    # --- Common repeating ---
+    "CTI": "Clinical Trial Identification",
+    "BLG": "Billing",
+    "FT1": "Financial Transaction",
+    "GP1": "Grouping/Reimbursement - Visit",
+    "GP2": "Grouping/Reimbursement - Procedure Line Item",
+    # --- Custom ---
+    "ZPM": "Z-Segment Custom (example)",
+}

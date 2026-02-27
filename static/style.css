@@ -1,0 +1,83 @@
+/* Custom overrides — Tailwind CDN covers the rest */
+
+/* Scrollbar slim */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #f1f5f9; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* Usage code badges */
+.badge-R  { background: #fee2e2; color: #991b1b; }
+.badge-RE { background: #dbeafe; color: #1e40af; }
+.badge-O  { background: #f1f5f9; color: #475569; }
+.badge-C  { background: #fef3c7; color: #92400e; }
+.badge-X  { background: #f1f5f9; color: #94a3b8; }
+
+/* Field row usage coloring */
+.row-R  { background: #fff7f7; }
+.row-RE { background: #f0f6ff; }
+.row-O  { background: #ffffff; }
+.row-C  { background: #fffbeb; }
+.row-X  { background: #f8fafc; color: #94a3b8; text-decoration: line-through; }
+
+/* Segment tree items */
+.tree-item { transition: background 0.1s; }
+.tree-item:hover { background: #f1f5f9; }
+.tree-item.selected { background: #e0f2fe; border-left: 3px solid #0284c7; }
+.tree-item.group-node { font-weight: 600; color: #0f172a; }
+.tree-item.segment-node { color: #334155; }
+
+/* Pill selector for usage codes */
+.usage-pill { cursor: pointer; padding: 2px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; border: 2px solid transparent; transition: all 0.1s; }
+.usage-pill:not(.active) { opacity: 0.5; border-color: transparent; }
+.usage-pill.active { opacity: 1; border-color: currentColor; }
+
+/* Toast notifications */
+.toast { animation: slideIn 0.25s ease; }
+@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* Transitions */
+[x-cloak] { display: none !important; }
+
+/* Modal backdrop */
+.modal-overlay { backdrop-filter: blur(2px); }
+
+/* Resizable panel divider */
+.panel-resizer {
+  width: 5px;
+  cursor: col-resize;
+  flex-shrink: 0;
+  background: transparent;
+  transition: background 0.15s;
+  position: relative;
+  z-index: 10;
+}
+.panel-resizer:hover,
+.panel-resizer.dragging {
+  background: #3b82f6;
+}
+
+/* Responsive: stack panels on small screens */
+@media (max-width: 767px) {
+  .editor-layout,
+  .validator-layout {
+    flex-direction: column !important;
+    overflow-y: auto !important;
+  }
+  .editor-layout aside,
+  .validator-layout .validator-left {
+    width: 100% !important;
+    min-width: unset !important;
+    max-width: unset !important;
+    height: auto !important;
+    max-height: 40vh;
+    border-right: none !important;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .editor-layout main,
+  .validator-layout .validator-right {
+    height: auto !important;
+    min-height: 50vh;
+  }
+  .panel-resizer { display: none; }
+}

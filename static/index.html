@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HL7 Validator</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✅</text></svg>">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="bg-gray-100 text-sm text-gray-800 h-screen overflow-hidden" x-data="profileEditor()" x-init="init()" x-cloak>
+
+<!-- ===== TOAST CONTAINER ===== -->
+<div class="fixed top-4 right-4 z-50 flex flex-col gap-2" style="min-width:280px">
+  <template x-for="t in toasts" :key="t.id">
+    <div class="toast flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg text-white text-xs"
+         :class="toastBg(t.type)">
+      <span x-text="t.type === 'success' ? '✓' : t.type === 'error' ? '✕' : 'ℹ'"></span>
+      <span x-text="t.msg" class="flex-1"></span>
+    </div>
+  </template>
+</div>
+
+<!-- ===== TOP TAB BAR ===== -->
+<div class="flex items-center bg-blue-700 text-white px-4 gap-0 h-10 flex-shrink-0 select-none">
+  <img src="/static/logo.png" alt="Logo" class="h-7 mr-6 object-contain">
+  <button @click="activeTab = 'editor'"
+          class="px-4 py-2 text-xs font-medium h-full border-b-2 transition-colors"
+          :class="activeTab === 'editor' ? 'border-white text-white' : 'border-transparent text-blue-200 hover:text-white'">
+    Profile Editor
+  </button>
+  <button @click="activeTab = 'validator'; if(!validatorProfileId && profiles.length) validatorProfileId = profiles[0].id"
+          class="px-4 py-2 text-xs font-medium h-full border-b-2 transition-colors"
+          :class="activeTab === 'validator' ? 'border-white text-white' : 'border-transparent text-blue-200 hover:text-white'">
+    Message Validator
+  </button>
+</div>
+
+<!-- ===== MAIN LAYOUT ===== -->
+<div class="flex" style="height: calc(100vh - 2.5rem)">
+
+  <!-- ========== PROFILE EDITOR (tab = editor) ========== -->
+  <template x-if="activeTab === 'editor'">
+  <div class="flex w-full h-full editor-layout">
+
+  <!-- ========== LEFT PANEL ========== -->
+  <aside id="editor-left" class="bg-white border-r border-gray-200 flex flex-col flex-shrink-0" style="width:288px;min-width:180px;max-width:480px">
+
+    <!-- Header -->
+    <div class="px-4 py-3 border-b border-gray-200 bg-blue-700 text-white">
+      <div class="flex items-center gap-2">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        <span class="font-semibold text-sm">HL7 Profile Editor</span>
+      </div>
+    </div>
+
+    <!-- Profile selector -->
+    <div class="px-3 py-3 border-b border-gray-100">
+      <label class="block text-xs font-medium text-gray-500 mb-1">Active Profile</label>
+      <div class="flex gap-1">
+        <select x-model="selectedProfileId" @change="loadProfile()"
+                class="flex-1 text-xs border border-gray-300 rounded px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+          <option value="">-- select profile --</option>
+          <template x-for="p in profiles" :key="p.id">
+            <option :value="p.id" x-text="p.id + ' (v' + p.hl7_version + ')'"></option>
+          </template>
+        </select>
+        <button @click="showNewProfileModal = true"
+                title="New Profile"
+                class="px-2 py-1.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">+</button>
+        <button @click="selectedProfileId && (showDuplicateModal = true)"
+                title="Duplicate Profile"
+                :disabled="!selectedProfileId"
+                class="px-2 py-1.5 bg-gray-100 text-gray-600 rounded text-xs hover:bg-gray-200 disabled:opacity-40">⧉</button>
+      </div>
+
+      <!-- Profile meta -->
+      <template x-if="currentProfile">
+        <div class="mt-2 text-xs text-gray-500 space-y-0.5">
+          <div x-text="currentProfile.profile.description" class="italic truncate"></div>
+          <div class="flex gap-2">
+            <span x-text="`v${currentProfile.profile.hl7_version}`" class="bg-gray-100 px-1.5 py-0.5 rounded"></span>
+            <span x-text="`Updated: ${currentProfile.profile.updated_at}`"></span>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Segment tree -->
+    <div class="flex-1 overflow-y-auto py-1">
+      <template x-if="!currentProfile">
+        <div class="p-4 text-xs text-gray-400 italic">Select or create a profile</div>
+      </template>
+      <template x-if="currentProfile && treeNodes.length === 0">
+        <div class="p-4 text-xs text-gray-400 italic">No segments defined yet.<br>Click "Add Segment" below.</div>
+      </template>
+      <template x-for="node in treeNodes" :key="node.id">
+        <div class="tree-item px-2 py-1 cursor-pointer flex items-center gap-1 rounded mx-1"
+             :style="`padding-left: ${node.depth * 14 + 8}px`"
+             :class="{
+               'selected': node.type === 'segment' && selectedSegmentName === node.segmentName,
+               'group-node': node.type === 'group',
+               'segment-node': node.type === 'segment',
+             }"
+             @click="node.type === 'segment' && selectSegment(node.segmentName)">
+
+          <!-- Group icon -->
+          <template x-if="node.type === 'group'">
+            <span class="text-gray-400 text-xs">▾</span>
+          </template>
+          <!-- Segment icon -->
+          <template x-if="node.type === 'segment'">
+            <span class="text-xs font-mono w-5 text-center text-gray-400">▸</span>
+          </template>
+
+          <span class="font-mono font-semibold text-xs" x-text="node.label"></span>
+          <span class="text-xs text-gray-400 truncate flex-1" x-text="node.desc"></span>
+
+          <!-- Usage badge -->
+          <span class="text-xs px-1 rounded font-semibold shrink-0"
+                :class="`badge-${node.usage}`"
+                x-text="node.usage"></span>
+
+          <!-- Delete segment button -->
+          <template x-if="node.type === 'segment'">
+            <button @click.stop="confirmDeleteSegment(node.segmentName)"
+                    class="ml-1 text-gray-300 hover:text-red-400 text-xs leading-none"
+                    title="Remove segment">✕</button>
+          </template>
+        </div>
+      </template>
+    </div>
+
+    <!-- Bottom actions -->
+    <div class="px-3 py-3 border-t border-gray-100 flex flex-wrap gap-1.5">
+      <button @click="openAddSegmentModal()" :disabled="!currentProfile"
+              class="flex-1 text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 disabled:opacity-40">
+        + Segment
+      </button>
+      <button @click="exportProfile()" :disabled="!currentProfile"
+              class="flex-1 text-xs bg-gray-100 text-gray-700 px-2 py-1.5 rounded hover:bg-gray-200 disabled:opacity-40">
+        ↓ Export
+      </button>
+      <label :class="currentProfile ? 'cursor-pointer' : 'opacity-40 pointer-events-none'"
+             class="flex-1 text-xs bg-gray-100 text-gray-700 px-2 py-1.5 rounded hover:bg-gray-200 text-center">
+        ↑ Import
+        <input type="file" accept=".yaml,.yml" class="hidden" @change="importProfile($event)" :disabled="!currentProfile">
+      </label>
+      <button @click="showDeleteProfileConfirm = true" :disabled="!currentProfile"
+              class="text-xs text-red-400 hover:text-red-600 px-2 py-1.5 disabled:opacity-40" title="Delete profile">
+        🗑
+      </button>
+    </div>
+  </aside>
+
+  <!-- Resizer editor left -->
+  <div class="panel-resizer" @mousedown="startResize($event, 'editor-left')"></div>
+
+  <!-- ========== CENTER PANEL ========== -->
+  <main class="flex-1 flex flex-col overflow-hidden min-w-0">
+
+    <!-- Segment header -->
+    <div class="bg-white border-b border-gray-200 px-6 py-3 flex items-center gap-3">
+      <template x-if="!selectedSegment">
+        <span class="text-gray-400 italic text-xs">Select a segment from the left panel</span>
+      </template>
+      <template x-if="selectedSegment">
+        <div class="flex items-center gap-3 w-full">
+          <span class="font-mono font-bold text-lg text-blue-700" x-text="selectedSegment.segment"></span>
+          <span class="text-gray-500 text-sm" x-text="selectedSegment.description"></span>
+          <span class="px-2 py-0.5 rounded text-xs font-semibold"
+                :class="`badge-${selectedSegment.usage}`"
+                x-text="usageLabel(selectedSegment.usage)"></span>
+          <span class="text-xs text-gray-400"
+                x-text="`[${selectedSegment.min}..${selectedSegment.max}]`"></span>
+          <div class="ml-auto">
+            <button @click="openFieldEditor(null)"
+                    class="text-xs bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700">
+              + Add Field
+            </button>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Field table -->
+    <div class="flex-1 overflow-auto p-4">
+      <template x-if="selectedSegment && selectedSegmentFields.length === 0">
+        <div class="text-center py-16 text-gray-400">
+          <div class="text-4xl mb-3">📋</div>
+          <div class="text-sm">No fields defined for this segment.</div>
+          <div class="text-xs mt-1">Click "Add Field" to start defining your company's requirements.</div>
+        </div>
+      </template>
+
+      <template x-if="selectedSegment && selectedSegmentFields.length > 0">
+        <table class="w-full text-xs border-collapse">
+          <thead>
+            <tr class="bg-gray-50 text-gray-500 uppercase tracking-wide text-left border-b border-gray-200">
+              <th class="px-3 py-2 w-12">Seq</th>
+              <th class="px-3 py-2">Name</th>
+              <th class="px-3 py-2 w-16">Type</th>
+              <th class="px-3 py-2 w-14">Usage</th>
+              <th class="px-3 py-2 w-20">Length</th>
+              <th class="px-3 py-2 w-28">Value Set</th>
+              <th class="px-3 py-2">Description / Notes</th>
+              <th class="px-3 py-2 w-16 text-center">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="field in selectedSegmentFields" :key="field.seq">
+              <tr class="border-b border-gray-100 hover:brightness-95 transition-all"
+                  :class="`row-${field.usage}`">
+                <td class="px-3 py-2 font-mono font-semibold text-gray-500"
+                    x-text="`${selectedSegment.segment}.${field.seq}`"></td>
+                <td class="px-3 py-2 font-medium" x-text="field.name"></td>
+                <td class="px-3 py-2">
+                  <span class="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-700"
+                        :title="datatypeName(field.datatype)"
+                        x-text="field.datatype"></span>
+                </td>
+                <td class="px-3 py-2">
+                  <span class="px-1.5 py-0.5 rounded font-semibold text-xs"
+                        :class="`badge-${field.usage}`"
+                        :title="usageLabel(field.usage)"
+                        x-text="field.usage"></span>
+                </td>
+                <td class="px-3 py-2 text-gray-500"
+                    x-text="field.min_length === field.max_length ? field.max_length : `${field.min_length}-${field.max_length}`"></td>
+                <td class="px-3 py-2">
+                  <template x-if="field.value_set">
+                    <button @click="openValueSetEditor(field.value_set)"
+                            class="text-blue-600 hover:underline font-mono text-xs"
+                            x-text="field.value_set"></button>
+                  </template>
+                  <template x-if="!field.value_set">
+                    <span class="text-gray-300">—</span>
+                  </template>
+                </td>
+                <td class="px-3 py-2">
+                  <div x-text="field.description" class="text-gray-600"></div>
+                  <template x-if="field.notes">
+                    <div x-text="field.notes" class="text-amber-700 italic mt-0.5 text-xs"></div>
+                  </template>
+                </td>
+                <td class="px-3 py-2 text-center">
+                  <div class="flex items-center justify-center gap-2">
+                    <button @click="openFieldEditor(field)" class="text-blue-400 hover:text-blue-600" title="Edit">✎</button>
+                    <button @click="confirmDeleteField(field.seq)" class="text-gray-300 hover:text-red-400" title="Delete">✕</button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </template>
+
+      <!-- Value Sets panel (shown below the field table) -->
+      <template x-if="currentProfile && Object.keys(profileValueSets).length > 0">
+        <div class="mt-6">
+          <div class="flex items-center gap-2 mb-3">
+            <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Value Sets in this Profile</h3>
+            <button @click="openValueSetEditor(null)"
+                    class="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">+ New</button>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <template x-for="(vs, vsName) in profileValueSets" :key="vsName">
+              <div class="bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs hover:border-blue-300 cursor-pointer"
+                   @click="openValueSetEditor(vsName)">
+                <div class="font-mono font-semibold text-blue-700" x-text="vsName"></div>
+                <div class="text-gray-400 text-xs" x-text="vs.description"></div>
+                <div class="text-gray-500 mt-1" x-text="`${vs.codes.length} codes`"></div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+
+      <template x-if="currentProfile && Object.keys(profileValueSets).length === 0">
+        <div class="mt-6 flex items-center gap-2">
+          <span class="text-xs text-gray-400">No value sets defined.</span>
+          <button @click="openValueSetEditor(null)"
+                  class="text-xs text-blue-600 hover:underline">+ Add Value Set</button>
+        </div>
+      </template>
+    </div>
+  </main>
+  </div><!-- end editor flex wrapper -->
+  </template><!-- end x-if editor -->
+
+  <!-- ========== VALIDATOR TAB ========== -->
+  <template x-if="activeTab === 'validator'">
+  <div class="flex w-full h-full overflow-hidden validator-layout">
+
+    <!-- Left: input -->
+    <div id="validator-left" class="validator-left flex-shrink-0 bg-white border-r border-gray-200 flex flex-col" style="width:384px;min-width:240px;max-width:600px">
+      <div class="px-4 py-3 border-b border-gray-100 bg-gray-50">
+        <h2 class="text-xs font-semibold text-gray-600 uppercase tracking-wide">Validate HL7 Message</h2>
+      </div>
+
+      <!-- Profile selector -->
+      <div class="px-4 py-3 border-b border-gray-100">
+        <label class="block text-xs font-medium text-gray-500 mb-1">Profile to validate against</label>
+        <select x-model="validatorProfileId"
+                class="w-full text-xs border border-gray-300 rounded px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+          <option value="">-- select profile --</option>
+          <template x-for="p in profiles" :key="p.id">
+            <option :value="p.id" x-text="p.id + ' (v' + p.hl7_version + ')'"></option>
+          </template>
+        </select>
+      </div>
+
+      <!-- Message input -->
+      <div class="flex-1 flex flex-col px-4 py-3 gap-2 overflow-hidden">
+        <div class="flex items-center justify-between">
+          <label class="text-xs font-medium text-gray-500">HL7 Message</label>
+          <div class="flex gap-2">
+            <button @click="loadSampleMessage()" :disabled="!validatorProfileId"
+                    class="text-xs text-blue-500 hover:text-blue-700 disabled:opacity-40">
+              Load sample
+            </button>
+            <button @click="clearValidator()"
+                    class="text-xs text-gray-400 hover:text-gray-600">
+              Clear
+            </button>
+          </div>
+        </div>
+        <textarea x-model="validatorMessage"
+                  placeholder="MSH|^~\&|APP|FAC|APP2|FAC2|20260101120000||ADT^A04^ADT_A01|MSG001|P|2.7&#10;EVN||20260101120000&#10;PID|1||MRN001^^^HOSP^MR||DOE^JANE||19850315|F&#10;PV1|1|O|CLINIC^^^HOSP||||DR001^SMITH^JOHN|||&#10;..."
+                  class="flex-1 font-mono text-xs border border-gray-200 rounded p-2 resize-none focus:outline-none focus:ring-1 focus:ring-blue-500 bg-gray-50"
+                  spellcheck="false"></textarea>
+        <p class="text-xs text-gray-400">
+          Separate segments with newline or carriage return.
+        </p>
+      </div>
+
+      <!-- Validate button -->
+      <div class="px-4 py-3 border-t border-gray-100">
+        <button @click="runValidation()"
+                :disabled="validating || !validatorProfileId || !validatorMessage.trim()"
+                class="w-full py-2 text-sm font-medium bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-40 flex items-center justify-center gap-2">
+          <template x-if="validating">
+            <span>Validating…</span>
+          </template>
+          <template x-if="!validating">
+            <span>▶ Validate Message</span>
+          </template>
+        </button>
+      </div>
+    </div>
+
+    <!-- Resizer validator left -->
+    <div class="panel-resizer" @mousedown="startResize($event, 'validator-left')"></div>
+
+    <!-- Right: results -->
+    <div class="validator-right flex-1 overflow-auto bg-gray-50 min-w-0">
+
+      <!-- No result yet -->
+      <template x-if="!validationResult && !validating">
+        <div class="flex flex-col items-center justify-center h-full text-gray-400">
+          <div class="text-5xl mb-4">🔍</div>
+          <div class="text-sm">Paste a message and click Validate</div>
+        </div>
+      </template>
+
+      <!-- Result -->
+      <template x-if="validationResult">
+        <div class="p-6">
+
+          <!-- Toolbar -->
+          <div class="flex justify-end mb-3">
+            <button @click="exportReportPdf()"
+                    class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded hover:bg-gray-50 text-gray-600">
+              &#x2193; Export PDF
+            </button>
+          </div>
+
+          <!-- Summary banner -->
+          <div class="rounded-xl p-4 mb-6 flex items-start gap-4"
+               :class="validationResult.is_valid ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'">
+            <div class="text-3xl" x-text="validationResult.is_valid ? '✅' : '❌'"></div>
+            <div>
+              <div class="font-semibold text-sm mb-1"
+                   :class="validationResult.is_valid ? 'text-green-800' : 'text-red-800'"
+                   x-text="validationResult.is_valid ? 'Message is VALID' : `Message has ${validationResult.error_count} error(s)`">
+              </div>
+              <div class="text-xs text-gray-600 space-y-0.5">
+                <div>Profile: <span class="font-mono font-semibold" x-text="validationResult.profile_id"></span>
+                     &nbsp;·&nbsp; HL7 v<span x-text="validationResult.hl7_version"></span>
+                </div>
+                <div>Message type detected: <span class="font-mono" x-text="validationResult.message_type || '—'"></span></div>
+                <div>Segments found: <span class="font-mono" x-text="validationResult.segments_found.join(' · ')"></span></div>
+                <template x-if="validationResult.segments_not_in_profile.length > 0">
+                  <div class="text-amber-700">
+                    Segments not in profile: <span class="font-mono" x-text="validationResult.segments_not_in_profile.join(' · ')"></span>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <!-- No errors detail -->
+          <template x-if="validationResult.is_valid">
+            <div class="text-center py-8 text-gray-400">
+              <div class="text-3xl mb-2">🎉</div>
+              <div class="text-sm">All profile rules passed.</div>
+            </div>
+          </template>
+
+          <!-- Error list grouped by segment -->
+          <template x-if="!validationResult.is_valid">
+            <div class="space-y-4">
+              <template x-for="group in validationBySegment" :key="group.seg">
+                <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                  <div class="px-4 py-2 bg-gray-50 border-b border-gray-200 flex items-center gap-2">
+                    <span class="font-mono font-bold text-sm text-gray-700" x-text="group.seg"></span>
+                    <span class="text-xs text-gray-400" x-text="`${group.issues.length} issue(s)`"></span>
+                  </div>
+                  <div class="divide-y divide-gray-100">
+                    <template x-for="(issue, i) in group.issues" :key="i">
+                      <div class="px-4 py-3 flex items-start gap-3">
+                        <!-- Severity icon -->
+                        <span class="text-base mt-0.5" x-text="issue.severity === 'ERROR' ? '✕' : '⚠'"></span>
+
+                        <div class="flex-1 min-w-0">
+                          <div class="flex items-center gap-2 mb-1 flex-wrap">
+                            <!-- Field ref -->
+                            <span class="font-mono text-xs font-semibold text-blue-700"
+                                  x-text="issue.seq > 0 ? issue.field : issue.segment"></span>
+                            <!-- Rule badge -->
+                            <span class="text-xs px-1.5 py-0.5 rounded font-medium"
+                                  :class="ruleBadge(issue.rule).color"
+                                  x-text="ruleBadge(issue.rule).label"></span>
+                          </div>
+                          <!-- Message -->
+                          <div class="text-xs text-gray-700" x-text="issue.message"></div>
+                          <!-- Value -->
+                          <template x-if="issue.value">
+                            <div class="mt-1 text-xs text-gray-400">
+                              Value: <span class="font-mono bg-gray-100 px-1 rounded" x-text="issue.value"></span>
+                            </div>
+                          </template>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+
+        </div>
+      </template>
+
+    </div>
+  </div>
+  </template><!-- end validator tab -->
+
+</div><!-- end main layout -->
+
+<!-- ===== MODAL: New Profile ===== -->
+<div x-show="showNewProfileModal" x-cloak
+     class="fixed inset-0 bg-black/40 modal-overlay flex items-center justify-center z-40"
+     @keydown.escape.window="showNewProfileModal = false">
+  <div class="bg-white rounded-xl shadow-2xl w-96 p-6" @click.stop>
+    <h2 class="text-base font-semibold mb-4">New Profile</h2>
+    <div class="space-y-3">
+      <div class="flex gap-2">
+        <div class="flex-1">
+          <label class="block text-xs text-gray-500 mb-1">Message Type *</label>
+          <input x-model="newProfile.message_type" placeholder="e.g. ADT"
+                 class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 uppercase"
+                 @input="newProfile.message_type = $el.value.toUpperCase()">
+        </div>
+        <div class="flex-1">
+          <label class="block text-xs text-gray-500 mb-1">Trigger Event *</label>
+          <input x-model="newProfile.trigger_event" placeholder="e.g. A01"
+                 class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 uppercase"
+                 @input="newProfile.trigger_event = $el.value.toUpperCase()">
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">HL7 Version</label>
+        <select x-model="newProfile.hl7_version"
+                class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+          <template x-for="v in hl7Versions" :key="v">
+            <option :value="v" :selected="v === newProfile.hl7_version" x-text="v"></option>
+          </template>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Description</label>
+        <input x-model="newProfile.description" placeholder="Brief description..."
+               class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Author</label>
+        <input x-model="newProfile.author" placeholder="Team or person responsible"
+               class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Variant / Scope <span class="text-gray-400">(optional)</span></label>
+        <input x-model="newProfile.name" placeholder="e.g. Urgencias, HIS_central, v2..."
+               class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+        <p class="text-xs text-gray-400 mt-1"
+           x-text="newProfile.name ? `ID: ${newProfile.message_type || 'ADT'}_${newProfile.trigger_event || 'A01'}_${newProfile.name.trim().replace(/ /g,'_')}` : `ID: ${newProfile.message_type || 'ADT'}_${newProfile.trigger_event || 'A01'}`">
+        </p>
+      </div>
+    </div>
+    <div class="flex justify-end gap-2 mt-5">
+      <button @click="showNewProfileModal = false"
+              class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+      <button @click="createProfile()"
+              class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: Duplicate Profile ===== -->
+<div x-show="showDuplicateModal" x-cloak
+     class="fixed inset-0 bg-black/40 modal-overlay flex items-center justify-center z-40"
+     @keydown.escape.window="showDuplicateModal = false">
+  <div class="bg-white rounded-xl shadow-2xl w-96 p-6" @click.stop>
+    <h2 class="text-base font-semibold mb-1">Duplicate Profile</h2>
+    <p class="text-xs text-gray-500 mb-4">Copying: <span class="font-mono font-medium" x-text="selectedProfileId"></span></p>
+    <div class="space-y-3">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Variant / Scope for the copy *</label>
+        <input x-model="duplicateName" placeholder="e.g. Urgencias, HIS_central, v2..."
+               class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+               @keydown.enter="duplicateProfile()">
+        <p class="text-xs text-gray-400 mt-1"
+           x-text="currentProfile ? (duplicateName.trim() ? `ID: ${currentProfile.profile.message_type}_${currentProfile.profile.trigger_event}_${duplicateName.trim().replace(/ /g,'_')}` : `ID: ${currentProfile.profile.message_type}_${currentProfile.profile.trigger_event}_copy`) : ''">
+        </p>
+      </div>
+    </div>
+    <div class="flex justify-end gap-2 mt-5">
+      <button @click="showDuplicateModal = false; duplicateName = ''"
+              class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+      <button @click="duplicateProfile()"
+              class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Duplicate</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: Add Segment ===== -->
+<div x-show="showSegmentModal" x-cloak
+     class="fixed inset-0 bg-black/40 modal-overlay flex items-center justify-center z-40"
+     @keydown.escape.window="showSegmentModal = false">
+  <div class="bg-white rounded-xl shadow-2xl w-[520px] p-6" @click.stop>
+    <h2 class="text-base font-semibold mb-4">Add Segment</h2>
+    <div class="space-y-3">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Segment *</label>
+        <input x-model="segmentSearch" placeholder="Search by code or name..."
+               class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm mb-1 focus:outline-none focus:ring-1 focus:ring-blue-500">
+        <div class="border border-gray-200 rounded h-36 overflow-y-auto bg-gray-50">
+          <template x-for="s in filteredSegments" :key="s.code">
+            <div @click="selectSegmentFromList(s.code)"
+                 class="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-blue-50 text-xs"
+                 :class="newSegment.segment === s.code ? 'bg-blue-100' : ''">
+              <span class="font-mono font-bold w-10 text-blue-700" x-text="s.code"></span>
+              <span class="text-gray-600" x-text="s.name"></span>
+            </div>
+          </template>
+        </div>
+        <div class="text-xs text-gray-400 mt-1">
+          Or type a custom code:
+          <input x-model="newSegment.segment" placeholder="e.g. ZPM"
+                 class="ml-2 border-b border-gray-300 focus:outline-none font-mono uppercase w-16 text-xs"
+                 @input="newSegment.segment = $el.value.toUpperCase()">
+        </div>
+      </div>
+      <div class="flex gap-2">
+        <div class="flex-1">
+          <label class="block text-xs text-gray-500 mb-1">Description</label>
+          <input x-model="newSegment.description" placeholder="Optional description"
+                 class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Usage</label>
+          <select x-model="newSegment.usage"
+                  class="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+            <template x-for="u in usageCodes" :key="u.code">
+              <option :value="u.code" x-text="u.code"></option>
+            </template>
+          </select>
+        </div>
+      </div>
+      <div class="flex gap-2">
+        <div class="flex-1">
+          <label class="block text-xs text-gray-500 mb-1">Min</label>
+          <input x-model.number="newSegment.min" type="number" min="0"
+                 class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+        </div>
+        <div class="flex-1">
+          <label class="block text-xs text-gray-500 mb-1">Max (* = unbounded)</label>
+          <input x-model="newSegment.max" placeholder="1 or *"
+                 class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+        </div>
+      </div>
+    </div>
+    <div class="flex justify-end gap-2 mt-5">
+      <button @click="showSegmentModal = false"
+              class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+      <button @click="addSegment()"
+              class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Add Segment</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: Field Editor ===== -->
+<div x-show="fieldEditorOpen" x-cloak
+     class="fixed inset-0 bg-black/40 modal-overlay flex items-center justify-center z-40"
+     @keydown.escape.window="fieldEditorOpen = false">
+  <div class="bg-white rounded-xl shadow-2xl w-[580px] max-h-[90vh] overflow-y-auto p-6" @click.stop>
+    <h2 class="text-base font-semibold mb-4"
+        x-text="editingField ? `Edit Field — ${selectedSegmentName}.${fieldForm.seq}` : 'Add Field'"></h2>
+    <div class="space-y-3">
+
+      <!-- Seq + Name -->
+      <div class="flex gap-2">
+        <div class="w-24">
+          <label class="block text-xs text-gray-500 mb-1">Seq # *</label>
+          <input x-model.number="fieldForm.seq" type="number" min="1"
+                 :readonly="!!editingField"
+                 :class="editingField ? 'bg-gray-50' : ''"
+                 class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+        </div>
+        <div class="flex-1">
+          <label class="block text-xs text-gray-500 mb-1">Name *</label>
+          <input x-model="fieldForm.name" placeholder="Field name"
+                 class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+        </div>
+      </div>
+
+      <!-- Datatype -->
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Data Type *</label>
+        <input x-model="dtSearch" placeholder="Search datatype..."
+               class="w-full border border-gray-300 rounded-t px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+        <select x-model="fieldForm.datatype" size="4"
+                class="w-full border border-gray-300 border-t-0 rounded-b text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white">
+          <template x-for="dt in filteredDatatypes" :key="dt.code">
+            <option :value="dt.code" x-text="`${dt.code} — ${dt.name}`"></option>
+          </template>
+        </select>
+        <div class="text-xs text-gray-400 mt-1">
+          Selected: <span class="font-mono font-semibold text-blue-700" x-text="fieldForm.datatype"></span>
+          <span x-text="' — ' + datatypeName(fieldForm.datatype)"></span>
+        </div>
+      </div>
+
+      <!-- Usage -->
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Usage *</label>
+        <div class="flex gap-2 flex-wrap">
+          <template x-for="u in usageCodes" :key="u.code">
+            <button type="button"
+                    @click="setUsageOnField(u.code)"
+                    class="usage-pill"
+                    :class="{
+                      'active': fieldForm.usage === u.code,
+                      'badge-R':  u.code === 'R',
+                      'badge-RE': u.code === 'RE',
+                      'badge-O':  u.code === 'O',
+                      'badge-C':  u.code === 'C',
+                      'badge-X':  u.code === 'X',
+                    }"
+                    :title="u.description"
+                    x-text="u.code">
+            </button>
+          </template>
+          <span class="text-xs text-gray-400 self-center" x-text="usageLabel(fieldForm.usage)"></span>
+        </div>
+      </div>
+
+      <!-- Length -->
+      <div class="flex gap-2">
+        <div class="flex-1">
+          <label class="block text-xs text-gray-500 mb-1">Min Length</label>
+          <input x-model.number="fieldForm.min_length" type="number" min="0"
+                 class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+        </div>
+        <div class="flex-1">
+          <label class="block text-xs text-gray-500 mb-1">Max Length</label>
+          <input x-model.number="fieldForm.max_length" type="number" min="0"
+                 class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+        </div>
+      </div>
+
+      <!-- Value Set -->
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Value Set</label>
+        <div class="flex gap-2">
+          <select x-model="fieldForm.value_set"
+                  class="flex-1 border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+            <option value="">— none —</option>
+            <template x-for="(vs, vsName) in profileValueSets" :key="vsName">
+              <option :value="vsName" x-text="`${vsName} (${vs.codes.length} codes)`"></option>
+            </template>
+          </select>
+          <button type="button" @click="openValueSetEditor(null)"
+                  class="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-300">
+            + New VS
+          </button>
+        </div>
+      </div>
+
+      <!-- Description -->
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Description</label>
+        <textarea x-model="fieldForm.description" rows="2"
+                  placeholder="What this field represents..."
+                  class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"></textarea>
+      </div>
+
+      <!-- Notes -->
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Implementation Notes</label>
+        <textarea x-model="fieldForm.notes" rows="2"
+                  placeholder="Company-specific rules, expected values, format notes..."
+                  class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"></textarea>
+      </div>
+    </div>
+
+    <div class="flex justify-end gap-2 mt-5">
+      <button @click="fieldEditorOpen = false"
+              class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+      <button @click="saveField()"
+              class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Save Field</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: Value Set Editor ===== -->
+<div x-show="showValueSetModal" x-cloak
+     class="fixed inset-0 bg-black/40 modal-overlay flex items-center justify-center z-50"
+     @keydown.escape.window="showValueSetModal = false">
+  <div class="bg-white rounded-xl shadow-2xl w-[640px] max-h-[90vh] overflow-y-auto p-6" @click.stop>
+    <h2 class="text-base font-semibold mb-4"
+        x-text="editingVsName ? `Edit Value Set — ${editingVsName}` : 'New Value Set'"></h2>
+    <div class="space-y-3">
+      <div class="flex gap-2">
+        <div class="flex-1">
+          <label class="block text-xs text-gray-500 mb-1">Name (identifier) *</label>
+          <input x-model="vsForm.newName"
+                 placeholder="e.g. VS_PATIENT_CLASS"
+                 :readonly="!!editingVsName"
+                 :class="editingVsName ? 'bg-gray-50' : ''"
+                 class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
+                 @input="vsForm.newName = $el.value.toUpperCase().replace(/\s+/g, '_')">
+        </div>
+        <div class="flex-1">
+          <label class="block text-xs text-gray-500 mb-1">Description</label>
+          <input x-model="vsForm.description" placeholder="What these codes represent"
+                 class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+        </div>
+      </div>
+
+      <!-- Codes table -->
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-xs text-gray-500 font-medium">Codes</label>
+          <button @click="addVsCode()"
+                  class="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">+ Add Code</button>
+        </div>
+        <table class="w-full text-xs border-collapse">
+          <thead>
+            <tr class="bg-gray-50 text-gray-500 text-left border-b border-gray-200">
+              <th class="px-2 py-1.5 w-28">Code *</th>
+              <th class="px-2 py-1.5">Display *</th>
+              <th class="px-2 py-1.5">Description</th>
+              <th class="px-2 py-1.5 w-8"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(c, idx) in vsForm.codes" :key="idx">
+              <tr class="border-b border-gray-100">
+                <td class="px-1 py-1">
+                  <input x-model="c.code"
+                         class="w-full border border-gray-200 rounded px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-blue-400">
+                </td>
+                <td class="px-1 py-1">
+                  <input x-model="c.display"
+                         class="w-full border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-400">
+                </td>
+                <td class="px-1 py-1">
+                  <input x-model="c.description"
+                         class="w-full border border-gray-200 rounded px-2 py-1 text-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-400">
+                </td>
+                <td class="px-1 py-1 text-center">
+                  <button @click="removeVsCode(idx)" class="text-gray-300 hover:text-red-400">✕</button>
+                </td>
+              </tr>
+            </template>
+            <tr x-show="vsForm.codes.length === 0">
+              <td colspan="4" class="px-2 py-3 text-center text-gray-400 italic">No codes yet. Click "+ Add Code".</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Delete VS button -->
+      <template x-if="editingVsName">
+        <div class="pt-2 border-t border-gray-100">
+          <button @click="deleteValueSet(editingVsName); showValueSetModal = false"
+                  class="text-xs text-red-400 hover:text-red-600">
+            Delete this value set
+          </button>
+        </div>
+      </template>
+    </div>
+
+    <div class="flex justify-end gap-2 mt-5">
+      <button @click="showValueSetModal = false"
+              class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+      <button @click="saveValueSet()"
+              class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Save Value Set</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== CONFIRM: Delete Profile ===== -->
+<div x-show="showDeleteProfileConfirm" x-cloak
+     class="fixed inset-0 bg-black/40 modal-overlay flex items-center justify-center z-50">
+  <div class="bg-white rounded-xl shadow-2xl p-6 w-80">
+    <h3 class="text-sm font-semibold mb-2 text-red-600">Delete Profile</h3>
+    <p class="text-sm text-gray-600 mb-4">
+      Delete <strong x-text="selectedProfileId"></strong>? This will permanently delete the YAML file.
+    </p>
+    <div class="flex justify-end gap-2">
+      <button @click="showDeleteProfileConfirm = false"
+              class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+      <button @click="deleteProfile()"
+              class="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== CONFIRM: Delete Segment ===== -->
+<div x-show="showDeleteSegmentConfirm" x-cloak
+     class="fixed inset-0 bg-black/40 modal-overlay flex items-center justify-center z-50">
+  <div class="bg-white rounded-xl shadow-2xl p-6 w-80">
+    <h3 class="text-sm font-semibold mb-2 text-red-600">Remove Segment</h3>
+    <p class="text-sm text-gray-600 mb-4">
+      Remove segment <strong x-text="deletingSegmentName"></strong> and all its fields?
+    </p>
+    <div class="flex justify-end gap-2">
+      <button @click="showDeleteSegmentConfirm = false"
+              class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+      <button @click="deleteSegment()"
+              class="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700">Remove</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== CONFIRM: Delete Field ===== -->
+<div x-show="showDeleteFieldConfirm" x-cloak
+     class="fixed inset-0 bg-black/40 modal-overlay flex items-center justify-center z-50">
+  <div class="bg-white rounded-xl shadow-2xl p-6 w-80">
+    <h3 class="text-sm font-semibold mb-2 text-red-600">Delete Field</h3>
+    <p class="text-sm text-gray-600 mb-4">
+      Delete field <strong x-text="`${selectedSegmentName}.${deletingFieldSeq}`"></strong>?
+    </p>
+    <div class="flex justify-end gap-2">
+      <button @click="showDeleteFieldConfirm = false"
+              class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+      <button @click="deleteField()"
+              class="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700">Delete</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

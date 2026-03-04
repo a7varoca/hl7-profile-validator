@@ -3,6 +3,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 from app.models.profile import (
     Profile,
+    ProfileSlim,
     ProfileSummary,
     ProfileCreateRequest,
     SegmentAddRequest,
@@ -53,6 +54,16 @@ async def import_profile(file: UploadFile = File(...)):
         return profile_service.import_profile_yaml(content)
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Invalid YAML: {e}")
+
+
+@router.get("/{profile_id}/slim", response_model=ProfileSlim)
+def get_profile_slim(profile_id: str):
+    """Profile without value_sets — fast initial load."""
+    try:
+        p = profile_service.get_profile(profile_id)
+        return ProfileSlim(profile=p.profile, structure=p.structure)
+    except FileNotFoundError as e:
+        _not_found(e)
 
 
 @router.get("/{profile_id}", response_model=Profile)

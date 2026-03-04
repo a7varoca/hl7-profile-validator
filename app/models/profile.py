@@ -73,6 +73,12 @@ class Profile(BaseModel):
     structure: List[Union[SegmentDef, GroupDef]] = Field(default_factory=list)
 
 
+class ProfileSlim(BaseModel):
+    """Profile without value_sets — for fast initial load."""
+    profile: ProfileMetadata
+    structure: List[Union[SegmentDef, GroupDef]] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Request / Response shapes for the API
 # ---------------------------------------------------------------------------

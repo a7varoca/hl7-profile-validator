@@ -5,7 +5,7 @@ from fastapi import Request
 from pathlib import Path
 
 from app.config import settings
-from app.routers import profiles, reference, validator
+from app.routers import profiles, reference, validator, backup, hl7standard
 
 app = FastAPI(
     title=settings.app_title,
@@ -16,6 +16,8 @@ app = FastAPI(
 app.include_router(profiles.router, prefix="/api/profiles", tags=["Profiles"])
 app.include_router(reference.router, prefix="/api/reference", tags=["Reference"])
 app.include_router(validator.router, prefix="/api/validate", tags=["Validator"])
+app.include_router(backup.router, prefix="/api/backup", tags=["Backup"])
+app.include_router(hl7standard.router, prefix="/api/hl7standard", tags=["HL7Standard"])
 
 static_dir = Path(__file__).parent.parent / "static"
 if static_dir.exists():

@@ -62,6 +62,10 @@ def _get_field_raw(seg: ParsedSegment, seq: int) -> str:
       PID.N → idx = seq
     """
     if seg.name == 'MSH':
+        # MSH.1 = field separator '|' — implicit, never in the split array
+        # MSH.2 = encoding chars — lives at fields[1]
+        if seq == 1:
+            return '|'
         idx = seq - 1
     else:
         idx = seq

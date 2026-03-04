@@ -26,6 +26,9 @@ from app.models.profile import (
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+_profile_cache: dict[str, Profile] = {}
+
+
 def _profile_path(profile_id: str) -> Path:
     return settings.profiles_dir / f"{profile_id}.yaml"
 
@@ -55,15 +58,20 @@ def _save(profile: Profile) -> Profile:
         ),
         encoding="utf-8",
     )
+    _profile_cache[profile.profile.id] = profile
     return profile
 
 
 def _load(profile_id: str) -> Profile:
+    if profile_id in _profile_cache:
+        return _profile_cache[profile_id]
     path = _profile_path(profile_id)
     if not path.exists():
         raise FileNotFoundError(f"Profile '{profile_id}' not found")
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    return _deserialize(data)
+    profile = _deserialize(data)
+    _profile_cache[profile_id] = profile
+    return profile
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +191,7 @@ def delete_profile(profile_id: str) -> None:
     if not path.exists():
         raise FileNotFoundError(f"Profile '{profile_id}' not found")
     path.unlink()
+    _profile_cache.pop(profile_id, None)
 
 
 def import_profile_yaml(yaml_content: str) -> Profile:

@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 *.pyo
 .env
+.env.*
 .venv/
 venv/
 dist/
@@ -26,7 +27,5 @@ build/
 .DS_Store
 Thumbs.db
 
-# Profiles — commit only examples, not sensitive company profiles
-# Uncomment the next line to exclude all profiles from version control:
-# profiles/*.yaml
-# profiles/!*Example*.yaml
+# HL7 Standard cache
+hl7standard_cache/

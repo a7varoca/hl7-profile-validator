@@ -63,6 +63,22 @@ function profileEditor() {
     showNewProfileModal: false,
     newProfile: { message_type: '', trigger_event: '', hl7_version: '2.7', description: '', author: '', name: '' },
 
+    // ---- HL7 Standard import ----
+    importMode: 'blank',       // 'blank' | 'standard'
+    hl7stdEvents: [],
+    hl7stdEventId: '',
+    hl7stdEventFilter: '',
+    loadingHl7stdEvents: false,
+    importingFromStandard: false,
+    importProgress: '',
+    get filteredHl7stdEvents() {
+      const q = this.hl7stdEventFilter.toLowerCase();
+      if (!q) return this.hl7stdEvents;
+      return this.hl7stdEvents.filter(e =>
+        e.id.toLowerCase().includes(q) || (e.label || '').toLowerCase().includes(q)
+      );
+    },
+
     showDuplicateModal: false,
     duplicateName: '',
 
@@ -80,6 +96,10 @@ function profileEditor() {
     editingField: null,  // null = new
     fieldForm: { seq: null, name: '', datatype: 'ST', usage: 'O', min_length: 0, max_length: 999, description: '', notes: '', value_set: '' },
 
+    expandedDesc: null,
+    showValueSets: false,
+    loadingValueSets: false,
+
     showValueSetModal: false,
     editingVsName: '',
     vsForm: { description: '', codes: [] },
@@ -89,6 +109,8 @@ function profileEditor() {
     deletingSegmentName: '',
     showDeleteFieldConfirm: false,
     deletingFieldSeq: null,
+    selectedFieldSeqs: [],
+    showDeleteFieldsConfirm: false,
 
     // ---- Notifications ----
     toasts: [],
@@ -151,13 +173,23 @@ function profileEditor() {
     async loadProfile() {
       if (!this.selectedProfileId) return;
       try {
-        this.currentProfile = await api.get(`/api/profiles/${this.selectedProfileId}`);
+        this.currentProfile = await api.get(`/api/profiles/${this.selectedProfileId}/slim`);
+        this.showValueSets = false;
         this.selectedSegmentName = null;
         this._buildTree();
-        // auto-select first segment
         const firstSeg = this.treeNodes.find(n => n.type === 'segment');
         if (firstSeg) this.selectSegment(firstSeg.segmentName);
       } catch (e) { this.toast(e.message, 'error'); }
+    },
+
+    async loadValueSets() {
+      if (!this.selectedProfileId) return;
+      this.loadingValueSets = true;
+      try {
+        const vs = await api.get(`/api/profiles/${this.selectedProfileId}/value-sets`);
+        this.currentProfile = { ...this.currentProfile, value_sets: vs };
+      } catch (e) { this.toast(e.message, 'error'); }
+      finally { this.loadingValueSets = false; }
     },
 
     async createProfile() {
@@ -171,8 +203,68 @@ function profileEditor() {
         this.selectedProfileId = p.profile.id;
         await this.loadProfile();
         this.toast(`Profile ${p.profile.id} created`, 'success');
-        this.newProfile = { message_type: '', trigger_event: '', hl7_version: '2.7', description: '', author: '', name: '' };
+        this._resetNewProfileModal();
       } catch (e) { this.toast(e.message, 'error'); }
+    },
+
+    async loadHl7stdEvents() {
+      this.loadingHl7stdEvents = true;
+      this.hl7stdEvents = [];
+      this.hl7stdEventId = '';
+      const version = this.newProfile.hl7_version;
+      try {
+        this.hl7stdEvents = await api.get(`/api/hl7standard/trigger-events?version=${version}`);
+      } catch (e) {
+        this.toast('Error loading HL7 standard events: ' + e.message, 'error');
+      } finally {
+        this.loadingHl7stdEvents = false;
+      }
+    },
+
+    async importFromStandard() {
+      if (!this.hl7stdEventId) { this.toast('Select a trigger event', 'error'); return; }
+      // Close modal immediately and show full-screen progress overlay
+      this.showNewProfileModal = false;
+      this.importingFromStandard = true;
+      this.importProgress = `Fetching HL7 ${this.newProfile.hl7_version} — ${this.hl7stdEventId} structure…`;
+      const eventId = this.hl7stdEventId;
+      const version = this.newProfile.hl7_version;
+      try {
+        this.importProgress = `Downloading segments and fields for ${eventId} (v${version})…`;
+        const p = await fetch('/api/hl7standard/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            version,
+            event_id: eventId,
+            name: this.newProfile.name,
+            description: this.newProfile.description,
+            author: this.newProfile.author,
+          }),
+        });
+        if (!p.ok) throw new Error((await p.json()).detail || p.statusText);
+        const profile = await p.json();
+        this.importProgress = 'Loading profile…';
+        this._resetNewProfileModal();
+        await this.loadProfiles();
+        this.selectedProfileId = profile.profile.id;
+        await this.loadProfile();
+        this.toast(`Profile ${profile.profile.id} imported from HL7 standard`, 'success');
+      } catch (e) {
+        this.showNewProfileModal = false;
+        this.toast(e.message, 'error');
+      } finally {
+        this.importingFromStandard = false;
+        this.importProgress = '';
+      }
+    },
+
+    _resetNewProfileModal() {
+      this.newProfile = { message_type: '', trigger_event: '', hl7_version: '2.7', description: '', author: '', name: '' };
+      this.importMode = 'blank';
+      this.hl7stdEvents = [];
+      this.hl7stdEventId = '';
+      this.hl7stdEventFilter = '';
     },
 
     async deleteProfile() {
@@ -230,11 +322,12 @@ function profileEditor() {
       this._flattenNodes(this.currentProfile.structure, 0);
     },
 
-    _flattenNodes(nodes, depth) {
+    _flattenNodes(nodes, depth, _counter = { n: 0 }) {
       for (const node of nodes) {
+        const idx = _counter.n++;
         if (node.segment) {
           this.treeNodes.push({
-            id: `seg-${node.segment}`,
+            id: `seg-${node.segment}-${idx}`,
             label: node.segment,
             desc: node.description || '',
             type: 'segment',
@@ -246,20 +339,22 @@ function profileEditor() {
           });
         } else if (node.group) {
           this.treeNodes.push({
-            id: `grp-${node.group}-${depth}`,
+            id: `grp-${node.group}-${idx}`,
             label: node.group,
             desc: node.description || '',
             type: 'group',
             depth,
             usage: node.usage,
           });
-          this._flattenNodes(node.segments || [], depth + 1);
+          this._flattenNodes(node.segments || [], depth + 1, _counter);
         }
       }
     },
 
     selectSegment(segmentName) {
       this.selectedSegmentName = segmentName;
+      this.selectedFieldSeqs = [];
+      this.expandedDesc = null;
     },
 
     // ---- Segment CRUD ----
@@ -354,13 +449,73 @@ function profileEditor() {
       } catch (e) { this.toast(e.message, 'error'); }
     },
 
+    toggleFieldSelection(seq) {
+      const idx = this.selectedFieldSeqs.indexOf(seq);
+      if (idx === -1) this.selectedFieldSeqs.push(seq);
+      else this.selectedFieldSeqs.splice(idx, 1);
+    },
+
+    toggleAllFields() {
+      const all = this.selectedSegmentFields.map(f => f.seq);
+      if (this.selectedFieldSeqs.length === all.length) this.selectedFieldSeqs = [];
+      else this.selectedFieldSeqs = [...all];
+    },
+
+    async deleteSelectedFields() {
+      const seqs = [...this.selectedFieldSeqs];
+      for (const seq of seqs) {
+        try {
+          this.currentProfile = await api.delete(
+            `/api/profiles/${this.selectedProfileId}/segments/${this.selectedSegmentName}/fields/${seq}`
+          );
+        } catch (e) { this.toast(`Error deleting field ${seq}: ${e.message}`, 'error'); }
+      }
+      this._buildTree();
+      this.selectedFieldSeqs = [];
+      this.showDeleteFieldsConfirm = false;
+      this.toast(`${seqs.length} field(s) deleted`, 'success');
+    },
+
     // ---- Value Sets ----
     get profileValueSets() {
       if (!this.currentProfile) return {};
       return this.currentProfile.value_sets || {};
     },
 
-    openValueSetEditor(vsName) {
+    get valueSetsGroupedBySegment() {
+      if (!this.currentProfile) return [];
+      const vs = this.currentProfile.value_sets || {};
+      const groups = {};
+      const fieldIndex = {};
+      const walk = (nodes) => {
+        for (const node of nodes) {
+          if (node.segment) {
+            for (const f of node.fields || []) {
+              if (f.value_set) fieldIndex[f.value_set] = { seg: node.segment, seq: f.seq, name: f.name };
+            }
+          } else if (node.group) { walk(node.segments || []); }
+        }
+      };
+      walk(this.currentProfile.structure || []);
+      const ungrouped = [];
+      for (const [vsName, vsData] of Object.entries(vs)) {
+        const info = fieldIndex[vsName];
+        if (info) {
+          if (!groups[info.seg]) groups[info.seg] = [];
+          groups[info.seg].push({ vsName, fieldSeq: info.seq, fieldName: info.name, vs: vsData });
+        } else { ungrouped.push({ vsName, vs: vsData }); }
+      }
+      for (const seg of Object.keys(groups)) groups[seg].sort((a, b) => a.fieldSeq - b.fieldSeq);
+      const result = Object.entries(groups).sort(([a],[b]) => a.localeCompare(b))
+        .map(([seg, items]) => ({ seg, items }));
+      if (ungrouped.length) result.push({ seg: null, items: ungrouped });
+      return result;
+    },
+
+    async openValueSetEditor(vsName) {
+      if (vsName && !this.profileValueSets[vsName]) {
+        await this.loadValueSets();
+      }
       this.editingVsName = vsName || '';
       if (vsName && this.profileValueSets[vsName]) {
         const vs = this.profileValueSets[vsName];
@@ -478,6 +633,31 @@ function profileEditor() {
     clearValidator() {
       this.validatorMessage = '';
       this.validationResult = null;
+    },
+
+    // ---- Backup / Restore ----
+    showMenu: false,
+
+    backupDownload() {
+      const a = document.createElement('a');
+      a.href = '/api/backup/';
+      a.download = `hl7-backup-${new Date().toISOString().slice(0, 10)}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    },
+
+    async restoreBackup(file) {
+      if (!file) return;
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        const r = await fetch('/api/backup/restore', { method: 'POST', body: fd });
+        if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+        const data = await r.json();
+        await this.loadProfiles();
+        this.toast(`Restore completado — ${data.profiles_restored} perfiles`, 'success');
+      } catch (e) { this.toast(e.message, 'error'); }
     },
 
     exportReportPdf() {

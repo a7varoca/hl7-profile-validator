@@ -30,7 +30,31 @@ A local web tool for defining and validating HL7 v2.x message profiles against c
 
 ## Quick Start
 
-### Option A — Docker (recommended)
+### Windows — Docker (recommended)
+
+Requires [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/).
+
+```bat
+docker compose up -d --build
+```
+
+Access at: **http://localhost:8000**
+
+### Windows — Without Docker
+
+Requires [Python 3.12+](https://www.python.org/downloads/). During installation, check **"Add Python to PATH"**.
+
+```bat
+:: First time only
+setup.bat
+
+:: Every time
+start.bat
+```
+
+`start.bat` opens the browser automatically at **http://localhost:8000**.
+
+### Linux / macOS — Docker (recommended)
 
 ```bash
 docker compose up -d --build
@@ -38,7 +62,7 @@ docker compose up -d --build
 
 Access at: **http://localhost:8000**
 
-### Option B — Local (development)
+### Linux / macOS — Local (development)
 
 ```bash
 python3 -m venv .venv
@@ -84,7 +108,9 @@ command-validator/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
-└── run.sh
+├── run.sh                       # Linux/macOS launcher
+├── setup.bat                    # Windows — first-time setup
+└── start.bat                    # Windows — launcher
 ```
 
 ---
@@ -255,7 +281,7 @@ Profiles can be version-controlled in Git alongside the application code.
 
 ## Requirements
 
-- Docker + Docker Compose v2, **or**
-- Python 3.12+
+- **Docker Desktop** (Windows/macOS/Linux) + Docker Compose v2, **or**
+- **Python 3.12+** (Windows: check "Add Python to PATH" during install)
 
 No other dependencies. The frontend loads Alpine.js and Tailwind CSS from CDN.

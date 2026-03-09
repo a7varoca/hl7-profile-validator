@@ -1,10 +1,9 @@
 from __future__ import annotations
+
 import yaml
-from pathlib import Path
 from datetime import date
 from typing import Union
 
-from app.config import settings
 from app.models.profile import (
     Profile,
     ProfileMetadata,
@@ -20,25 +19,25 @@ from app.models.profile import (
     ValueSetUpsertRequest,
     UsageCode,
 )
+from app.services import db
+
+
+# ---------------------------------------------------------------------------
+# In-memory cache (warm copy of deserialized Profile objects)
+# ---------------------------------------------------------------------------
+
+_profile_cache: dict[str, Profile] = {}
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-_profile_cache: dict[str, Profile] = {}
-
-
-def _profile_path(profile_id: str) -> Path:
-    return settings.profiles_dir / f"{profile_id}.yaml"
-
-
 def _today() -> str:
     return str(date.today())
 
 
 def _serialize(profile: Profile) -> dict:
-    """Convert Profile to a plain dict suitable for YAML serialization."""
     return profile.model_dump(mode="json", exclude_none=False)
 
 
@@ -48,16 +47,8 @@ def _deserialize(data: dict) -> Profile:
 
 def _save(profile: Profile) -> Profile:
     profile.profile.updated_at = _today()
-    path = _profile_path(profile.profile.id)
-    path.write_text(
-        yaml.dump(
-            _serialize(profile),
-            allow_unicode=True,
-            default_flow_style=False,
-            sort_keys=False,
-        ),
-        encoding="utf-8",
-    )
+    data = _serialize(profile)
+    db.save(profile.profile.id, data)
     _profile_cache[profile.profile.id] = profile
     return profile
 
@@ -65,10 +56,7 @@ def _save(profile: Profile) -> Profile:
 def _load(profile_id: str) -> Profile:
     if profile_id in _profile_cache:
         return _profile_cache[profile_id]
-    path = _profile_path(profile_id)
-    if not path.exists():
-        raise FileNotFoundError(f"Profile '{profile_id}' not found")
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data = db.load(profile_id)  # raises FileNotFoundError if missing
     profile = _deserialize(data)
     _profile_cache[profile_id] = profile
     return profile
@@ -82,7 +70,6 @@ def _find_segment(
     nodes: list[Union[SegmentDef, GroupDef]],
     segment_name: str,
 ) -> SegmentDef | None:
-    """Depth-first search through structure for a SegmentDef by name."""
     for node in nodes:
         if isinstance(node, SegmentDef) and node.segment == segment_name:
             return node
@@ -112,24 +99,18 @@ def _remove_segment(
 # ---------------------------------------------------------------------------
 
 def list_profiles() -> list[ProfileSummary]:
-    summaries = []
-    for f in sorted(settings.profiles_dir.glob("*.yaml")):
-        try:
-            data = yaml.safe_load(f.read_text(encoding="utf-8"))
-            meta = data.get("profile", {})
-            summaries.append(
-                ProfileSummary(
-                    id=meta.get("id", f.stem),
-                    message_type=meta.get("message_type", ""),
-                    trigger_event=meta.get("trigger_event", ""),
-                    hl7_version=meta.get("hl7_version", ""),
-                    description=meta.get("description"),
-                    updated_at=meta.get("updated_at"),
-                )
-            )
-        except Exception:
-            continue
-    return summaries
+    rows = db.list_summaries()
+    return [
+        ProfileSummary(
+            id=r["id"],
+            message_type=r["message_type"],
+            trigger_event=r["trigger_event"],
+            hl7_version=r["hl7_version"],
+            description=r.get("description"),
+            updated_at=r.get("updated_at"),
+        )
+        for r in rows
+    ]
 
 
 def get_profile(profile_id: str) -> Profile:
@@ -137,17 +118,14 @@ def get_profile(profile_id: str) -> Profile:
 
 
 def get_profile_yaml(profile_id: str) -> str:
-    path = _profile_path(profile_id)
-    if not path.exists():
-        raise FileNotFoundError(f"Profile '{profile_id}' not found")
-    return path.read_text(encoding="utf-8")
+    return db.load_yaml(profile_id)
 
 
 def create_profile(req: ProfileCreateRequest) -> Profile:
     base = f"{req.message_type}_{req.trigger_event}"
     suffix = f"_{req.name.strip().replace(' ', '_')}" if req.name and req.name.strip() else ""
     profile_id = f"{base}{suffix}"
-    if _profile_path(profile_id).exists():
+    if db.exists(profile_id):
         raise ValueError(f"Profile '{profile_id}' already exists")
     today = _today()
     profile = Profile(
@@ -170,7 +148,7 @@ def duplicate_profile(source_id: str, new_name: str) -> Profile:
     suffix = f"_{new_name.strip().replace(' ', '_')}" if new_name and new_name.strip() else "_copy"
     base = f"{source.profile.message_type}_{source.profile.trigger_event}"
     new_id = f"{base}{suffix}"
-    if _profile_path(new_id).exists():
+    if db.exists(new_id):
         raise ValueError(f"Profile '{new_id}' already exists")
     today = _today()
     source.profile.id = new_id
@@ -180,17 +158,14 @@ def duplicate_profile(source_id: str, new_name: str) -> Profile:
 
 
 def update_profile(profile_id: str, profile: Profile) -> Profile:
-    if not _profile_path(profile_id).exists():
+    if not db.exists(profile_id):
         raise FileNotFoundError(f"Profile '{profile_id}' not found")
     profile.profile.id = profile_id
     return _save(profile)
 
 
 def delete_profile(profile_id: str) -> None:
-    path = _profile_path(profile_id)
-    if not path.exists():
-        raise FileNotFoundError(f"Profile '{profile_id}' not found")
-    path.unlink()
+    db.delete(profile_id)  # raises FileNotFoundError if missing
     _profile_cache.pop(profile_id, None)
 
 
@@ -206,7 +181,6 @@ def import_profile_yaml(yaml_content: str) -> Profile:
 
 def add_segment(profile_id: str, req: SegmentAddRequest) -> Profile:
     profile = _load(profile_id)
-    # Check not already in structure at top level
     existing = _find_segment(profile.structure, req.segment)
     if existing:
         raise ValueError(f"Segment '{req.segment}' already exists in profile")
@@ -254,18 +228,19 @@ def upsert_field(profile_id: str, segment_name: str, req: FieldUpsertRequest) ->
     seg = _find_segment(profile.structure, segment_name)
     if not seg:
         raise FileNotFoundError(f"Segment '{segment_name}' not found in profile '{profile_id}'")
-    # Remove existing field with same seq (upsert)
     seg.fields = [f for f in seg.fields if f.seq != req.seq]
     new_field = FieldDef(
         seq=req.seq,
         name=req.name,
         datatype=req.datatype,
         usage=req.usage,
+        repeatable=req.repeatable,
         min_length=req.min_length,
         max_length=req.max_length,
         description=req.description,
         notes=req.notes,
         value_set=req.value_set,
+        components=req.components,
     )
     seg.fields.append(new_field)
     seg.fields.sort(key=lambda f: f.seq)

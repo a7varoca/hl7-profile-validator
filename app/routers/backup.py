@@ -5,7 +5,8 @@ from io import BytesIO
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse
 
-from app.config import settings
+from app.services import db as profile_db
+from app.services.profile_service import import_profile_yaml
 
 router = APIRouter()
 
@@ -14,9 +15,8 @@ router = APIRouter()
 def download_backup():
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        if settings.profiles_dir.exists():
-            for yaml_file in sorted(settings.profiles_dir.glob("*.yaml")):
-                zf.write(yaml_file, f"profiles/{yaml_file.name}")
+        for profile_id, yaml_str in profile_db.all_as_yaml():
+            zf.writestr(f"profiles/{profile_id}.yaml", yaml_str.encode("utf-8"))
     buf.seek(0)
     filename = f"hl7-backup-{date.today()}.zip"
     return StreamingResponse(
@@ -46,8 +46,11 @@ async def restore_backup(file: UploadFile = File(...)):
             # Sanitize: reject any path traversal attempts
             if "/" in fname or "\\" in fname:
                 continue
-            settings.profiles_dir.mkdir(exist_ok=True)
-            (settings.profiles_dir / fname).write_bytes(zf.read(name))
-            profiles_restored += 1
+            try:
+                yaml_content = zf.read(name).decode("utf-8")
+                import_profile_yaml(yaml_content)
+                profiles_restored += 1
+            except Exception:
+                continue
 
     return {"profiles_restored": profiles_restored}

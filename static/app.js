@@ -84,6 +84,9 @@ function profileEditor() {
 
     showSegmentModal: false,
     newSegment: { segment: '', usage: 'O', min: 0, max: 1, description: '' },
+
+    showEditSegmentModal: false,
+    editSegment: { segment: '', usage: 'O', min: 0, max: '*', description: '' },
     segmentSearch: '',
     get filteredSegments() {
       const q = this.segmentSearch.toLowerCase();
@@ -94,9 +97,17 @@ function profileEditor() {
 
     fieldEditorOpen: false,
     editingField: null,  // null = new
-    fieldForm: { seq: null, name: '', datatype: 'ST', usage: 'O', min_length: 0, max_length: 999, description: '', notes: '', value_set: '' },
+    fieldForm: { seq: null, name: '', datatype: 'ST', usage: 'O', repeatable: false, min_length: 0, max_length: 999, description: '', notes: '', value_set: '' },
+
+    componentEditorOpen: false,
+    editingComponentFieldSeq: null,
+    editingComponentParentSeq: null,  // null = editing a component; number = editing a subcomponent (parent comp seq)
+    componentForm: { seq: null, name: '', datatype: '', usage: 'O', repeatable: false, value_set: '' },
+    compDtSearch: '',
 
     expandedDesc: null,
+    expandedComponents: null,     // seq of field whose components sub-table is open
+    expandedSubcomponents: null,  // "fieldSeq.compSeq" key for expanded subcomponent rows
     showValueSets: false,
     loadingValueSets: false,
 
@@ -111,6 +122,9 @@ function profileEditor() {
     deletingFieldSeq: null,
     selectedFieldSeqs: [],
     showDeleteFieldsConfirm: false,
+
+    // ---- Global busy flag (prevents double-submits) ----
+    busy: false,
 
     // ---- Notifications ----
     toasts: [],
@@ -146,17 +160,19 @@ function profileEditor() {
     },
 
     async _loadReference() {
-      const [dt, seg, ver, uc] = await Promise.all([
-        api.get('/api/reference/datatypes'),
-        api.get('/api/reference/segments'),
-        api.get('/api/reference/versions'),
-        api.get('/api/reference/usage-codes'),
-      ]);
-      this.refDatatypes = dt;
-      this.refSegments = seg;
-      this.hl7Versions = ver;
-      if (ver.includes('2.7')) this.newProfile.hl7_version = '2.7';
-      this.usageCodes = uc;
+      try {
+        const [dt, seg, ver, uc] = await Promise.all([
+          api.get('/api/reference/datatypes'),
+          api.get('/api/reference/segments'),
+          api.get('/api/reference/versions'),
+          api.get('/api/reference/usage-codes'),
+        ]);
+        this.refDatatypes = dt;
+        this.refSegments = seg;
+        this.hl7Versions = ver;
+        if (ver.includes('2.7')) this.newProfile.hl7_version = '2.7';
+        this.usageCodes = uc;
+      } catch (e) { this.toast('Error loading reference data: ' + e.message, 'error'); }
     },
 
     // ---- Profiles ----
@@ -196,6 +212,7 @@ function profileEditor() {
       if (!this.newProfile.message_type || !this.newProfile.trigger_event) {
         this.toast('Message Type and Trigger Event are required', 'error'); return;
       }
+      this.busy = true;
       try {
         const p = await api.post('/api/profiles/', this.newProfile);
         this.showNewProfileModal = false;
@@ -205,6 +222,7 @@ function profileEditor() {
         this.toast(`Profile ${p.profile.id} created`, 'success');
         this._resetNewProfileModal();
       } catch (e) { this.toast(e.message, 'error'); }
+      finally { this.busy = false; }
     },
 
     async loadHl7stdEvents() {
@@ -268,6 +286,7 @@ function profileEditor() {
     },
 
     async deleteProfile() {
+      this.busy = true;
       try {
         await api.delete(`/api/profiles/${this.selectedProfileId}`);
         this.showDeleteProfileConfirm = false;
@@ -277,10 +296,12 @@ function profileEditor() {
         await this.loadProfiles();
         this.toast('Profile deleted', 'success');
       } catch (e) { this.toast(e.message, 'error'); }
+      finally { this.busy = false; }
     },
 
     async duplicateProfile() {
       if (!this.selectedProfileId) return;
+      this.busy = true;
       try {
         const p = await api.post(`/api/profiles/${this.selectedProfileId}/duplicate`, { name: this.duplicateName });
         this.showDuplicateModal = false;
@@ -290,6 +311,7 @@ function profileEditor() {
         await this.loadProfile();
         this.toast(`Profile duplicated as ${p.profile.id}`, 'success');
       } catch (e) { this.toast(e.message, 'error'); }
+      finally { this.busy = false; }
     },
 
     exportProfile() {
@@ -297,11 +319,14 @@ function profileEditor() {
       a.href = `/api/profiles/${this.selectedProfileId}/export`;
       a.download = `${this.selectedProfileId}.yaml`;
       a.click();
+      this.toast(`Downloading ${this.selectedProfileId}.yaml…`, 'info');
     },
 
     async importProfile(event) {
       const file = event.target.files[0];
       if (!file) return;
+      this.busy = true;
+      this.toast('Importing profile…', 'info');
       const fd = new FormData();
       fd.append('file', file);
       try {
@@ -313,7 +338,7 @@ function profileEditor() {
         await this.loadProfile();
         this.toast(`Profile ${p.profile.id} imported`, 'success');
       } catch (e) { this.toast(e.message, 'error'); }
-      event.target.value = '';
+      finally { this.busy = false; event.target.value = ''; }
     },
 
     // ---- Segment tree ----
@@ -355,6 +380,8 @@ function profileEditor() {
       this.selectedSegmentName = segmentName;
       this.selectedFieldSeqs = [];
       this.expandedDesc = null;
+      this.expandedComponents = null;
+      this.expandedSubcomponents = null;
     },
 
     // ---- Segment CRUD ----
@@ -372,6 +399,7 @@ function profileEditor() {
 
     async addSegment() {
       if (!this.newSegment.segment) { this.toast('Select a segment', 'error'); return; }
+      this.busy = true;
       const payload = { ...this.newSegment, max: this.newSegment.max === '*' ? '*' : Number(this.newSegment.max) };
       try {
         this.currentProfile = await api.post(`/api/profiles/${this.selectedProfileId}/segments`, payload);
@@ -380,6 +408,27 @@ function profileEditor() {
         this.showSegmentModal = false;
         this.toast(`Segment ${this.newSegment.segment} added`, 'success');
       } catch (e) { this.toast(e.message, 'error'); }
+      finally { this.busy = false; }
+    },
+
+    openEditSegmentModal() {
+      const seg = this.selectedSegment;
+      if (!seg) return;
+      this.editSegment = { segment: seg.segment, usage: seg.usage, min: seg.min, max: seg.max, description: seg.description || '' };
+      this.showEditSegmentModal = true;
+    },
+
+    async saveEditSegment() {
+      this.busy = true;
+      const payload = { ...this.editSegment, max: this.editSegment.max === '*' ? '*' : Number(this.editSegment.max) };
+      try {
+        this.currentProfile = await api.put(`/api/profiles/${this.selectedProfileId}/segments/${this.editSegment.segment}`, payload);
+        this._buildTree();
+        this.selectSegment(this.editSegment.segment);
+        this.showEditSegmentModal = false;
+        this.toast(`Segment ${this.editSegment.segment} updated`, 'success');
+      } catch (e) { this.toast(e.message, 'error'); }
+      finally { this.busy = false; }
     },
 
     confirmDeleteSegment(segmentName) {
@@ -388,6 +437,7 @@ function profileEditor() {
     },
 
     async deleteSegment() {
+      this.busy = true;
       try {
         this.currentProfile = await api.delete(`/api/profiles/${this.selectedProfileId}/segments/${this.deletingSegmentName}`);
         this._buildTree();
@@ -395,6 +445,7 @@ function profileEditor() {
         this.showDeleteSegmentConfirm = false;
         this.toast(`Segment ${this.deletingSegmentName} removed`, 'success');
       } catch (e) { this.toast(e.message, 'error'); }
+      finally { this.busy = false; }
     },
 
     // ---- Field CRUD ----
@@ -402,7 +453,7 @@ function profileEditor() {
       if (field) {
         this.fieldForm = { ...field, value_set: field.value_set || '' };
       } else {
-        this.fieldForm = { seq: null, name: '', datatype: 'ST', usage: 'O', min_length: 0, max_length: 999, description: '', notes: '', value_set: '' };
+        this.fieldForm = { seq: null, name: '', datatype: 'ST', usage: 'O', repeatable: false, min_length: 0, max_length: 999, description: '', notes: '', value_set: '' };
       }
       this.editingField = field;
       this.dtSearch = '';
@@ -415,12 +466,19 @@ function profileEditor() {
       return this.refDatatypes.filter(d => d.code.toLowerCase().includes(q) || d.name.toLowerCase().includes(q));
     },
 
+    get filteredCompDatatypes() {
+      const q = this.compDtSearch.toLowerCase();
+      if (!q) return this.refDatatypes;
+      return this.refDatatypes.filter(d => d.code.toLowerCase().includes(q) || d.name.toLowerCase().includes(q));
+    },
+
     setUsageOnField(code) { this.fieldForm.usage = code; },
 
     async saveField() {
       if (!this.fieldForm.seq || !this.fieldForm.name || !this.fieldForm.datatype) {
         this.toast('Seq, Name and Datatype are required', 'error'); return;
       }
+      this.busy = true;
       const payload = { ...this.fieldForm, value_set: this.fieldForm.value_set || null };
       try {
         this.currentProfile = await api.post(
@@ -431,6 +489,77 @@ function profileEditor() {
         this.fieldEditorOpen = false;
         this.toast(`Field ${this.selectedSegmentName}.${this.fieldForm.seq} saved`, 'success');
       } catch (e) { this.toast(e.message, 'error'); }
+      finally { this.busy = false; }
+    },
+
+    // ---- Component editor ----
+    async openComponentEditor(field, comp, parentComp = null) {
+      if (!Object.keys(this.profileValueSets).length) await this.loadValueSets();
+      this.editingComponentFieldSeq = field.seq;
+      this.editingComponentParentSeq = parentComp ? parentComp.seq : null;
+      this.componentForm = { ...comp, value_set: comp.value_set || '' };
+      this.compDtSearch = '';
+      this.componentEditorOpen = true;
+    },
+
+    async saveComponent() {
+      this.busy = true;
+      const seg = this._findSegment(this.currentProfile.structure, this.selectedSegmentName);
+      if (!seg) { this.busy = false; return; }
+      const field = seg.fields.find(f => f.seq === this.editingComponentFieldSeq);
+      if (!field) return;
+
+      if (this.editingComponentParentSeq !== null) {
+        // Editing a subcomponent — navigate to parent component first
+        const parentComp = field.components.find(c => c.seq === this.editingComponentParentSeq);
+        if (!parentComp) return;
+        const idx = parentComp.components.findIndex(s => s.seq === this.componentForm.seq);
+        if (idx === -1) return;
+        parentComp.components[idx] = {
+          ...parentComp.components[idx],
+          name: this.componentForm.name,
+          datatype: this.componentForm.datatype,
+          usage: this.componentForm.usage,
+          repeatable: this.componentForm.repeatable,
+          value_set: this.componentForm.value_set || null,
+        };
+      } else {
+        // Editing a component
+        const idx = field.components.findIndex(c => c.seq === this.componentForm.seq);
+        if (idx === -1) return;
+        field.components[idx] = {
+          ...field.components[idx],
+          name: this.componentForm.name,
+          datatype: this.componentForm.datatype,
+          usage: this.componentForm.usage,
+          repeatable: this.componentForm.repeatable,
+          value_set: this.componentForm.value_set || null,
+        };
+      }
+
+      // Persist via full field upsert (components + subcomponents included)
+      const payload = { ...field, value_set: field.value_set || null };
+      try {
+        this.currentProfile = await api.post(
+          `/api/profiles/${this.selectedProfileId}/segments/${this.selectedSegmentName}/fields`,
+          payload
+        );
+        this._buildTree();
+        this.componentEditorOpen = false;
+        const loc = this.editingComponentParentSeq !== null
+          ? `${this.selectedSegmentName}.${this.editingComponentFieldSeq}.${this.editingComponentParentSeq}.${this.componentForm.seq}`
+          : `${this.selectedSegmentName}.${this.editingComponentFieldSeq}.${this.componentForm.seq}`;
+        this.toast(`Saved ${loc}`, 'success');
+      } catch (e) { this.toast(e.message, 'error'); }
+      finally { this.busy = false; }
+    },
+
+    _findSegment(nodes, name) {
+      for (const node of nodes) {
+        if (node.segment === name) return node;
+        if (node.segments) { const r = this._findSegment(node.segments, name); if (r) return r; }
+      }
+      return null;
     },
 
     confirmDeleteField(seq) {
@@ -439,6 +568,7 @@ function profileEditor() {
     },
 
     async deleteField() {
+      this.busy = true;
       try {
         this.currentProfile = await api.delete(
           `/api/profiles/${this.selectedProfileId}/segments/${this.selectedSegmentName}/fields/${this.deletingFieldSeq}`
@@ -447,6 +577,7 @@ function profileEditor() {
         this.showDeleteFieldConfirm = false;
         this.toast(`Field seq=${this.deletingFieldSeq} deleted`, 'success');
       } catch (e) { this.toast(e.message, 'error'); }
+      finally { this.busy = false; }
     },
 
     toggleFieldSelection(seq) {
@@ -462,6 +593,7 @@ function profileEditor() {
     },
 
     async deleteSelectedFields() {
+      this.busy = true;
       const seqs = [...this.selectedFieldSeqs];
       for (const seq of seqs) {
         try {
@@ -473,6 +605,7 @@ function profileEditor() {
       this._buildTree();
       this.selectedFieldSeqs = [];
       this.showDeleteFieldsConfirm = false;
+      this.busy = false;
       this.toast(`${seqs.length} field(s) deleted`, 'success');
     },
 
@@ -541,20 +674,24 @@ function profileEditor() {
     async saveValueSet() {
       const name = this.vsForm.newName || this.editingVsName;
       if (!name) { this.toast('Value set name is required', 'error'); return; }
+      this.busy = true;
       const payload = { description: this.vsForm.description, codes: this.vsForm.codes };
       try {
         this.currentProfile = await api.post(`/api/profiles/${this.selectedProfileId}/value-sets/${name}`, payload);
         this.showValueSetModal = false;
         this.toast(`Value set ${name} saved`, 'success');
       } catch (e) { this.toast(e.message, 'error'); }
+      finally { this.busy = false; }
     },
 
     async deleteValueSet(vsName) {
       if (!confirm(`Delete value set "${vsName}"?`)) return;
+      this.busy = true;
       try {
         this.currentProfile = await api.delete(`/api/profiles/${this.selectedProfileId}/value-sets/${vsName}`);
         this.toast(`Value set ${vsName} deleted`, 'success');
       } catch (e) { this.toast(e.message, 'error'); }
+      finally { this.busy = false; }
     },
 
     // ---- Helpers ----
@@ -645,10 +782,13 @@ function profileEditor() {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+      this.toast('Downloading backup…', 'info');
     },
 
     async restoreBackup(file) {
       if (!file) return;
+      this.busy = true;
+      this.toast('Restoring backup…', 'info');
       const fd = new FormData();
       fd.append('file', file);
       try {
@@ -656,8 +796,9 @@ function profileEditor() {
         if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
         const data = await r.json();
         await this.loadProfiles();
-        this.toast(`Restore completado — ${data.profiles_restored} perfiles`, 'success');
+        this.toast(`Backup restored — ${data.profiles_restored} profile(s)`, 'success');
       } catch (e) { this.toast(e.message, 'error'); }
+      finally { this.busy = false; }
     },
 
     exportReportPdf() {

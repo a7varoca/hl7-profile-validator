@@ -1,19 +1,44 @@
 # HL7 Profile Editor & Validator
 
-A local web tool for defining and validating HL7 v2.x message profiles against company-specific implementation specifications.
+A local web tool for defining and validating HL7 v2.x message profiles.
 
-> All data stays local — no external APIs, no cloud services. Designed for sensitive healthcare environments.
+> All data stays local — no cloud services. Designed for sensitive healthcare environments.
 
 ---
 
 ## Features
 
 - **Profile Editor** — Define HL7 v2.x validation profiles: segments, fields, cardinality, usage codes and value sets
+- **HL7 Standard Import** — Import profiles directly from the HL7 standard for any version (2.1–2.8) and trigger event
 - **Message Validator** — Paste any HL7 v2.x pipe-delimited message and validate it against a profile
-- **PDF Report** — Export validation results as a formatted PDF report with highlighted fields
-- **Profile Management** — Create, duplicate, import/export profiles as YAML files
-- **Responsive UI** — Resizable panels, works on tablet and desktop
-- **No build step** — Pure Alpine.js + Tailwind CSS CDN frontend
+- **Backup & Restore** — Export/import all profiles as a ZIP of YAML files
+
+---
+
+## Quick Start
+
+### Docker (recommended)
+
+```bash
+docker compose up -d --build
+```
+
+Access at **http://localhost:8000**
+
+### Local (Linux / macOS)
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+### Local (Windows)
+
+```bat
+setup.bat   # first time only
+start.bat   # every time
+```
 
 ---
 
@@ -21,103 +46,53 @@ A local web tool for defining and validating HL7 v2.x message profiles against c
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | Python 3.12 + FastAPI + PyYAML |
-| Frontend | Alpine.js 3.x + Tailwind CSS (CDN) |
-| Storage | YAML files in `profiles/` |
+| Backend | Python 3.12 + FastAPI |
+| Frontend | Alpine.js + Tailwind CSS (CDN, no build step) |
+| Storage | SQLite (`profiles.db`) |
 | Container | Docker + Docker Compose |
 
 ---
 
-## Quick Start
+## Data Persistence
 
-### Windows — Docker (recommended)
+Everything lives in a single SQLite file — `profiles.db`:
 
-Requires [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/).
+| Table | Contents |
+|-------|----------|
+| `profiles` | All user-defined profiles (JSON) |
+| `hl7_raw` | HL7 Standard API response cache |
+| `hl7_segments` | Pre-built segment definitions cache |
 
-```bat
-docker compose up -d --build
+The file is mounted as a Docker volume so it survives container rebuilds:
+
+```yaml
+# docker-compose.yml
+volumes:
+  - ./profiles.db:/app/profiles.db
 ```
-
-Access at: **http://localhost:8000**
-
-### Windows — Without Docker
-
-Requires [Python 3.12+](https://www.python.org/downloads/). During installation, check **"Add Python to PATH"**.
-
-```bat
-:: First time only
-setup.bat
-
-:: Every time
-start.bat
-```
-
-`start.bat` opens the browser automatically at **http://localhost:8000**.
-
-### Linux / macOS — Docker (recommended)
-
-```bash
-docker compose up -d --build
-```
-
-Access at: **http://localhost:8000**
-
-### Linux / macOS — Local (development)
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-./run.sh
-```
-
-Access at: **http://localhost:8000**
 
 ---
 
-## Project Structure
+## Migrating to a New Server
 
-```
-command-validator/
-├── app/
-│   ├── main.py                  # FastAPI app, routes, static files
-│   ├── config.py                # Settings (profiles dir)
-│   ├── models/
-│   │   ├── profile.py           # Profile, SegmentDef, GroupDef, FieldDef, ValueSet
-│   │   ├── reference.py         # Datatype/Segment reference models
-│   │   └── validation.py        # ValidationResult, ValidationError
-│   ├── routers/
-│   │   ├── profiles.py          # CRUD + segments/fields/value sets
-│   │   ├── reference.py         # HL7 reference data endpoints
-│   │   └── validator.py         # POST /api/validate/
-│   ├── services/
-│   │   ├── profile_service.py   # YAML persistence, profile operations
-│   │   ├── reference_service.py # Reference data access
-│   │   └── validator_service.py # HL7 parser + validation engine
-│   └── reference_data/
-│       ├── datatypes.py         # 55+ HL7 datatypes
-│       ├── segments.py          # 80+ HL7 segments
-│       └── versions.py          # HL7 versions + usage code definitions
-├── static/
-│   ├── index.html               # SPA layout + modals
-│   ├── app.js                   # Alpine.js component
-│   ├── style.css                # Custom styles
-│   └── logo.png                 # Application logo
-├── profiles/                    # YAML profile files (mounted as Docker volume)
-│   └── ADT_A04_Example.yaml
-├── Dockerfile
-├── docker-compose.yml
-├── requirements.txt
-├── run.sh                       # Linux/macOS launcher
-├── setup.bat                    # Windows — first-time setup
-└── start.bat                    # Windows — launcher
-```
+All data is in `profiles.db`. To move the tool to another machine:
+
+1. **Copy `profiles.db`** to the new server alongside the project files
+2. Run as usual — profiles and HL7 cache are immediately available
+
+If you only want to move the profiles (without the HL7 cache):
+
+1. In the current instance, open the **⋮ menu → Download backup** — downloads a `.zip` with all profiles as YAML files
+2. Deploy the tool on the new server (fresh `profiles.db` will be created on first start)
+3. Open the **⋮ menu → Restore backup** and upload the `.zip`
+
+> The HL7 standard cache will be rebuilt automatically on demand (one-time per message type, results cached in the DB).
 
 ---
 
 ## Profile Format
 
-Profiles are plain YAML files stored in the `profiles/` directory. Example structure:
+Profiles can be exported/imported as YAML. Minimal example:
 
 ```yaml
 profile:
@@ -125,21 +100,13 @@ profile:
   message_type: ADT
   trigger_event: A04
   hl7_version: "2.7"
-  description: ADT Register Patient — Urgencias
-  author: Integration Team
-  created_at: "2026-01-01"
-  updated_at: "2026-01-15"
 
 value_sets:
   VS_PATIENT_CLASS:
     description: Patient class codes
     codes:
-      - code: E
-        display: Emergency
-      - code: I
-        display: Inpatient
-      - code: O
-        display: Outpatient
+      - { code: E, display: Emergency }
+      - { code: I, display: Inpatient }
 
 structure:
   - segment: MSH
@@ -152,136 +119,55 @@ structure:
         datatype: MSG
         usage: R
         max_length: 15
-
-  - group: PATIENT
+  - segment: PID
     usage: R
     min: 1
     max: 1
-    segments:
-      - segment: PID
+    fields:
+      - seq: 3
+        name: Patient Identifier List
+        datatype: CX
         usage: R
-        min: 1
-        max: 1
-        fields:
-          - seq: 3
-            name: Patient Identifier List
-            datatype: CX
-            usage: R
-            max_length: 250
-            value_set: VS_IDENTIFIER_TYPE
+        max_length: 250
 ```
 
 ### Usage Codes
 
 | Code | Meaning |
 |------|---------|
-| R | Required — must be present and non-empty |
-| RE | Required but may be Empty |
-| O | Optional — no constraint |
-| C | Conditional — depends on another field |
-| X | Not Supported — must not be present |
-
----
-
-## API Reference
-
-Base URL: `http://localhost:8000/api`
-
-### Profiles
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/profiles/` | List all profiles |
-| `POST` | `/profiles/` | Create new profile |
-| `GET` | `/profiles/{id}` | Get profile |
-| `PUT` | `/profiles/{id}` | Update profile |
-| `DELETE` | `/profiles/{id}` | Delete profile |
-| `POST` | `/profiles/{id}/duplicate` | Duplicate profile |
-| `GET` | `/profiles/{id}/export` | Download YAML |
-| `POST` | `/profiles/import` | Upload YAML file |
-| `POST` | `/profiles/{id}/segments` | Add segment |
-| `PUT` | `/profiles/{id}/segments/{seg}` | Update segment |
-| `DELETE` | `/profiles/{id}/segments/{seg}` | Delete segment |
-| `POST` | `/profiles/{id}/segments/{seg}/fields` | Add/update field |
-| `DELETE` | `/profiles/{id}/segments/{seg}/fields/{seq}` | Delete field |
-| `POST` | `/profiles/{id}/value-sets/{name}` | Add/update value set |
-| `DELETE` | `/profiles/{id}/value-sets/{name}` | Delete value set |
-
-### Validator
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/validate/` | Validate HL7 message |
-
-**Request body:**
-```json
-{
-  "profile_id": "ADT_A04_Urgencias",
-  "message": "MSH|^~\\&|APP|FAC|APP2|FAC2|20260101||ADT^A04^ADT_A01|MSG001|P|2.7\rPID|1||MRN123^^^HOSP^MR||DOE^JANE||19850315|F"
-}
-```
-
-### Reference
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/reference/datatypes` | HL7 datatypes (55+) |
-| `GET` | `/reference/segments` | HL7 segments (80+) |
-| `GET` | `/reference/versions` | Supported versions |
-| `GET` | `/reference/usage-codes` | Usage code definitions |
-
-Interactive API docs available at: `http://localhost:8000/docs`
+| R  | Required — must be present and non-empty |
+| RE | Required but may be empty |
+| O  | Optional |
+| C  | Conditional |
+| X  | Not supported — must not be present |
 
 ---
 
 ## Validation Rules
 
-The validator checks:
-
-- **SEGMENT_REQUIRED** — Required segment (`R`) missing from message
-- **SEGMENT_NOT_SUPPORTED** — Segment marked `X` present in message
-- **SEGMENT_CARDINALITY** — Segment appears more times than `max` allows
-- **FIELD_REQUIRED** — Required field (`R`) empty or missing
-- **FIELD_MAX_LENGTH** — Field value exceeds defined maximum length
-- **INVALID_CODE** — Field value not found in the associated value set
-
-> Group validation is conditional: optional groups (`O`, `RE`, `C`) are only validated if at least one of their child segments is present in the message.
+| Rule | Description |
+|------|-------------|
+| `SEGMENT_REQUIRED` | Required segment missing |
+| `SEGMENT_NOT_SUPPORTED` | Segment marked `X` is present |
+| `SEGMENT_CARDINALITY` | Segment exceeds max occurrences |
+| `FIELD_REQUIRED` | Required field empty or missing |
+| `FIELD_MAX_LENGTH` | Field value exceeds max length |
+| `INVALID_CODE` | Value not in the associated value set |
 
 ---
 
-## Profile Naming
+## API
 
-Profile IDs are generated as:
+Interactive docs at **http://localhost:8000/docs**
+
+Key endpoints:
 
 ```
-{MESSAGE_TYPE}_{TRIGGER_EVENT}[_{VARIANT}]
+POST /api/validate/                      Validate an HL7 message
+GET  /api/profiles/                      List profiles
+POST /api/profiles/import                Import YAML
+GET  /api/profiles/{id}/export           Export YAML
+GET  /api/backup/                        Download all profiles (ZIP)
+POST /api/backup/restore                 Restore from ZIP
+POST /api/hl7standard/import             Import from HL7 standard
 ```
-
-Examples:
-- `ADT_A04` — base profile
-- `ADT_A04_Urgencias` — variant for the Emergency department
-- `ADT_A04_HIS_central` — variant for a specific HIS system
-
-This allows multiple profiles for the same message type without conflicts.
-
----
-
-## Data Persistence
-
-The `profiles/` directory is mounted as a Docker volume — profiles survive container restarts and rebuilds:
-
-```yaml
-volumes:
-  - ./profiles:/app/profiles
-```
-
-Profiles can be version-controlled in Git alongside the application code.
-
----
-
-## Requirements
-
-- **Docker Desktop** (Windows/macOS/Linux) + Docker Compose v2, **or**
-- **Python 3.12+** (Windows: check "Add Python to PATH" during install)
-
-No other dependencies. The frontend loads Alpine.js and Tailwind CSS from CDN.

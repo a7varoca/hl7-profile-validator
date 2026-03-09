@@ -5,6 +5,5 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./profiles:/app/profiles
-      - ./hl7standard_cache:/app/hl7standard_cache
+      - ./profiles.db:/app/profiles.db
     restart: unless-stopped

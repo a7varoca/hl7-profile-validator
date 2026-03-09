@@ -23,16 +23,31 @@ class ValueSet(BaseModel):
     codes: List[ValueCode] = Field(default_factory=list)
 
 
+class ComponentDef(BaseModel):
+    seq: int           # component position (1-based)
+    name: str
+    datatype: str
+    usage: UsageCode = UsageCode.O
+    repeatable: bool = False
+    value_set: Optional[str] = None  # references a key in profile.value_sets
+    components: List["ComponentDef"] = Field(default_factory=list)  # subcomponents
+
+
+ComponentDef.model_rebuild()
+
+
 class FieldDef(BaseModel):
     seq: int
     name: str
     datatype: str
     usage: UsageCode = UsageCode.O
+    repeatable: bool = False
     min_length: int = 0
     max_length: int = 999
     description: Optional[str] = None
     notes: Optional[str] = None
     value_set: Optional[str] = None  # references a key in profile.value_sets
+    components: List["ComponentDef"] = Field(default_factory=list)
 
 
 class SegmentDef(BaseModel):
@@ -121,11 +136,13 @@ class FieldUpsertRequest(BaseModel):
     name: str
     datatype: str
     usage: UsageCode = UsageCode.O
+    repeatable: bool = False
     min_length: int = 0
     max_length: int = 999
     description: Optional[str] = None
     notes: Optional[str] = None
     value_set: Optional[str] = None
+    components: List[ComponentDef] = Field(default_factory=list)
 
 
 class ValueSetUpsertRequest(BaseModel):

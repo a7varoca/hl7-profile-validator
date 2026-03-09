@@ -13,7 +13,7 @@
 <body class="bg-gray-100 text-sm text-gray-800 h-screen overflow-hidden" x-data="profileEditor()" x-init="init()" x-cloak>
 
 <!-- ===== TOAST CONTAINER ===== -->
-<div class="fixed top-4 right-4 z-50 flex flex-col gap-2" style="min-width:280px">
+<div class="fixed top-4 right-4 z-50 flex flex-col gap-2 w-72 sm:w-80">
   <template x-for="t in toasts" :key="t.id">
     <div class="toast flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg text-white text-xs"
          :class="toastBg(t.type)">
@@ -81,7 +81,7 @@
   <div class="flex w-full h-full editor-layout">
 
   <!-- ========== LEFT PANEL ========== -->
-  <aside id="editor-left" class="bg-white border-r border-gray-200 flex flex-col flex-shrink-0" style="width:288px;min-width:180px;max-width:480px">
+  <aside id="editor-left" class="bg-white border-r border-gray-200 flex flex-col flex-shrink-0" style="width:288px;min-width:160px;max-width:480px">
 
     <!-- Header -->
     <div class="px-4 py-3 border-b border-gray-200 bg-blue-700 text-white">
@@ -210,6 +210,12 @@
                 x-text="usageLabel(selectedSegment.usage)"></span>
           <span class="text-xs text-gray-400"
                 x-text="`[${selectedSegment.min}..${selectedSegment.max}]`"></span>
+          <button @click="openEditSegmentModal()"
+                  class="text-gray-400 hover:text-blue-600 p-1 rounded hover:bg-gray-100" title="Edit segment">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/>
+            </svg>
+          </button>
           <div class="ml-auto">
             <button @click="openFieldEditor(null)"
                     class="text-xs bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700">
@@ -244,6 +250,7 @@
             </div>
           </template>
 
+          <div class="field-table-wrapper">
           <table class="w-full text-xs border-collapse">
             <thead>
               <tr class="bg-gray-50 text-gray-500 uppercase tracking-wide text-left border-b border-gray-200">
@@ -258,24 +265,36 @@
                 <th class="px-3 py-2">Name</th>
                 <th class="px-3 py-2 w-16">Type</th>
                 <th class="px-3 py-2 w-14">Usage</th>
+                <th class="px-3 py-2 w-16">Repeat</th>
                 <th class="px-3 py-2 w-20">Length</th>
                 <th class="px-3 py-2 w-28">Value Set</th>
                 <th class="px-3 py-2">Description / Notes</th>
                 <th class="px-3 py-2 w-16 text-center">Actions</th>
               </tr>
             </thead>
-            <tbody>
-              <template x-for="field in selectedSegmentFields" :key="field.seq">
+            <template x-for="field in selectedSegmentFields" :key="field.seq">
+              <tbody>
+                <!-- Main field row -->
                 <tr class="border-b border-gray-100 hover:brightness-95 transition-all"
-                    :class="[`row-${field.usage}`, selectedFieldSeqs.includes(field.seq) ? 'bg-red-50' : '']">
+                    :class="[`row-${field.usage}`, selectedFieldSeqs.includes(field.seq) ? 'bg-red-50' : '', expandedComponents === field.seq ? 'border-b-0' : '']">
                   <td class="px-3 py-2">
                     <input type="checkbox"
                            :checked="selectedFieldSeqs.includes(field.seq)"
                            @change="toggleFieldSelection(field.seq)"
                            class="rounded border-gray-300">
                   </td>
-                  <td class="px-3 py-2 font-mono font-semibold text-gray-500"
-                      x-text="`${selectedSegment.segment}.${field.seq}`"></td>
+                  <td class="px-3 py-2 font-mono font-semibold text-gray-500">
+                    <div class="flex items-center gap-1">
+                      <template x-if="field.components && field.components.length > 0">
+                        <button @click="expandedComponents = expandedComponents === field.seq ? null : field.seq"
+                                class="text-gray-400 hover:text-blue-500 leading-none"
+                                :title="expandedComponents === field.seq ? 'Hide components' : `Show ${field.components.length} components`">
+                          <span x-text="expandedComponents === field.seq ? '▾' : '▸'"></span>
+                        </button>
+                      </template>
+                      <span x-text="`${selectedSegment.segment}.${field.seq}`"></span>
+                    </div>
+                  </td>
                   <td class="px-3 py-2 font-medium" x-text="field.name"></td>
                   <td class="px-3 py-2">
                     <span class="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-700"
@@ -288,6 +307,9 @@
                           :title="usageLabel(field.usage)"
                           x-text="field.usage"></span>
                   </td>
+                  <td class="px-3 py-2 text-xs"
+                      :class="field.repeatable ? 'text-teal-600 font-medium' : 'text-gray-300'"
+                      x-text="field.repeatable ? 'Yes' : 'No'"></td>
                   <td class="px-3 py-2 text-gray-500"
                       x-text="field.min_length === field.max_length ? field.max_length : `${field.min_length}-${field.max_length}`"></td>
                   <td class="px-3 py-2">
@@ -319,9 +341,133 @@
                     </div>
                   </td>
                 </tr>
-              </template>
-            </tbody>
+                <!-- Components sub-table (expanded) -->
+                <template x-if="expandedComponents === field.seq && field.components && field.components.length > 0">
+                  <tr class="border-b border-blue-100 bg-blue-50/40">
+                    <td colspan="9" class="px-4 py-2">
+                      <table class="w-full text-xs">
+                        <thead>
+                          <tr class="text-gray-400 uppercase tracking-wide border-b border-blue-100">
+                            <th class="px-2 py-1 text-left w-28">Component</th>
+                            <th class="px-2 py-1 text-left">Name</th>
+                            <th class="px-2 py-1 text-left w-16">Type</th>
+                            <th class="px-2 py-1 text-left w-16">Usage</th>
+                            <th class="px-2 py-1 text-left w-20">Repeat</th>
+                            <th class="px-2 py-1 text-left">Value Set</th>
+                            <th class="px-2 py-1 w-8"></th>
+                          </tr>
+                        </thead>
+                        <template x-for="comp in field.components" :key="comp.seq">
+                          <tbody>
+                            <tr class="border-b border-blue-50 hover:bg-blue-50/60"
+                                :class="expandedSubcomponents === `${field.seq}.${comp.seq}` ? 'border-b-0' : 'last:border-0'">
+                              <td class="px-2 py-1 font-mono font-semibold text-blue-600">
+                                <div class="flex items-center gap-1">
+                                  <template x-if="comp.components && comp.components.length > 0">
+                                    <button @click="expandedSubcomponents = expandedSubcomponents === `${field.seq}.${comp.seq}` ? null : `${field.seq}.${comp.seq}`"
+                                            class="text-blue-300 hover:text-indigo-500 leading-none"
+                                            :title="expandedSubcomponents === `${field.seq}.${comp.seq}` ? 'Hide subcomponents' : `Show ${comp.components.length} subcomponents`">
+                                      <span x-text="expandedSubcomponents === `${field.seq}.${comp.seq}` ? '▾' : '▸'"></span>
+                                    </button>
+                                  </template>
+                                  <span x-text="`${selectedSegment.segment}.${field.seq}.${comp.seq}`"></span>
+                                </div>
+                              </td>
+                              <td class="px-2 py-1 text-gray-700" x-text="comp.name"></td>
+                              <td class="px-2 py-1">
+                                <span class="font-mono bg-blue-100 px-1 py-0.5 rounded text-blue-700"
+                                      x-text="comp.datatype"></span>
+                              </td>
+                              <td class="px-2 py-1">
+                                <span class="px-1 py-0.5 rounded font-semibold"
+                                      :class="`badge-${comp.usage}`"
+                                      x-text="comp.usage"></span>
+                              </td>
+                              <td class="px-2 py-1 text-gray-500">
+                                <span x-text="comp.repeatable ? 'Yes' : 'No'"
+                                      :class="comp.repeatable ? 'text-teal-600 font-medium' : 'text-gray-400'"></span>
+                              </td>
+                              <td class="px-2 py-1">
+                                <template x-if="comp.value_set">
+                                  <button @click="openValueSetEditor(comp.value_set)"
+                                          class="text-blue-600 hover:underline font-mono"
+                                          x-text="comp.value_set"></button>
+                                </template>
+                                <template x-if="!comp.value_set">
+                                  <span class="text-gray-300">—</span>
+                                </template>
+                              </td>
+                              <td class="px-2 py-1 text-center">
+                                <button @click="openComponentEditor(field, comp)"
+                                        class="text-blue-400 hover:text-blue-600" title="Edit component">✎</button>
+                              </td>
+                            </tr>
+                            <!-- Subcomponents row -->
+                            <template x-if="expandedSubcomponents === `${field.seq}.${comp.seq}` && comp.components && comp.components.length > 0">
+                              <tr class="border-b border-indigo-100 bg-indigo-50/40">
+                                <td colspan="7" class="pl-8 pr-2 py-2">
+                                  <table class="w-full text-xs">
+                                    <thead>
+                                      <tr class="text-gray-400 uppercase tracking-wide border-b border-indigo-100">
+                                        <th class="px-2 py-1 text-left w-36">Subcomponent</th>
+                                        <th class="px-2 py-1 text-left">Name</th>
+                                        <th class="px-2 py-1 text-left w-16">Type</th>
+                                        <th class="px-2 py-1 text-left w-16">Usage</th>
+                                        <th class="px-2 py-1 text-left w-20">Repeat</th>
+                                        <th class="px-2 py-1 text-left">Value Set</th>
+                                        <th class="px-2 py-1 w-8"></th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      <template x-for="sub in comp.components" :key="sub.seq">
+                                        <tr class="border-b border-indigo-50 last:border-0 hover:bg-indigo-50/60">
+                                          <td class="px-2 py-1 font-mono font-semibold text-indigo-600"
+                                              x-text="`${selectedSegment.segment}.${field.seq}.${comp.seq}.${sub.seq}`"></td>
+                                          <td class="px-2 py-1 text-gray-700" x-text="sub.name"></td>
+                                          <td class="px-2 py-1">
+                                            <span class="font-mono bg-indigo-100 px-1 py-0.5 rounded text-indigo-700"
+                                                  x-text="sub.datatype"></span>
+                                          </td>
+                                          <td class="px-2 py-1">
+                                            <span class="px-1 py-0.5 rounded font-semibold"
+                                                  :class="`badge-${sub.usage}`"
+                                                  x-text="sub.usage"></span>
+                                          </td>
+                                          <td class="px-2 py-1 text-gray-500">
+                                            <span x-text="sub.repeatable ? 'Yes' : 'No'"
+                                                  :class="sub.repeatable ? 'text-teal-600 font-medium' : 'text-gray-400'"></span>
+                                          </td>
+                                          <td class="px-2 py-1">
+                                            <template x-if="sub.value_set">
+                                              <button @click="openValueSetEditor(sub.value_set)"
+                                                      class="text-indigo-600 hover:underline font-mono"
+                                                      x-text="sub.value_set"></button>
+                                            </template>
+                                            <template x-if="!sub.value_set">
+                                              <span class="text-gray-300">—</span>
+                                            </template>
+                                          </td>
+                                          <td class="px-2 py-1 text-center">
+                                            <button @click="openComponentEditor(field, sub, comp)"
+                                                    class="text-indigo-400 hover:text-indigo-600" title="Edit subcomponent">✎</button>
+                                          </td>
+                                        </tr>
+                                      </template>
+                                    </tbody>
+                                  </table>
+                                </td>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </template>
+                      </table>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </template>
           </table>
+          </div><!-- /.field-table-wrapper -->
         </div>
       </template>
 
@@ -393,7 +539,7 @@
   <div class="flex w-full h-full overflow-hidden validator-layout">
 
     <!-- Left: input -->
-    <div id="validator-left" class="validator-left flex-shrink-0 bg-white border-r border-gray-200 flex flex-col" style="width:384px;min-width:240px;max-width:600px">
+    <div id="validator-left" class="validator-left flex-shrink-0 bg-white border-r border-gray-200 flex flex-col" style="width:384px;min-width:200px;max-width:600px">
       <div class="px-4 py-3 border-b border-gray-100 bg-gray-50">
         <h2 class="text-xs font-semibold text-gray-600 uppercase tracking-wide">Validate HL7 Message</h2>
       </div>
@@ -563,7 +709,7 @@
 <div x-show="showNewProfileModal" x-cloak
      class="fixed inset-0 bg-black/40 modal-overlay flex items-center justify-center z-40"
      @keydown.escape.window="showNewProfileModal = false; _resetNewProfileModal()">
-  <div class="bg-white rounded-xl shadow-2xl p-6" style="width:28rem" @click.stop>
+  <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4" @click.stop>
     <h2 class="text-base font-semibold mb-4">New Profile</h2>
 
     <!-- Mode toggle -->
@@ -682,9 +828,10 @@
 
       <!-- Blank mode: Create button -->
       <template x-if="importMode === 'blank'">
-        <button @click="createProfile()"
-                class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">
-          Create
+        <button @click="createProfile()" :disabled="busy"
+                class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+          <template x-if="busy"><span class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span></template>
+          <span x-text="busy ? 'Creating…' : 'Create'"></span>
         </button>
       </template>
 
@@ -705,7 +852,7 @@
 <div x-show="showDuplicateModal" x-cloak
      class="fixed inset-0 bg-black/40 modal-overlay flex items-center justify-center z-40"
      @keydown.escape.window="showDuplicateModal = false">
-  <div class="bg-white rounded-xl shadow-2xl w-96 p-6" @click.stop>
+  <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm mx-4" @click.stop>
     <h2 class="text-base font-semibold mb-1">Duplicate Profile</h2>
     <p class="text-xs text-gray-500 mb-4">Copying: <span class="font-mono font-medium" x-text="selectedProfileId"></span></p>
     <div class="space-y-3">
@@ -722,8 +869,11 @@
     <div class="flex justify-end gap-2 mt-5">
       <button @click="showDuplicateModal = false; duplicateName = ''"
               class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
-      <button @click="duplicateProfile()"
-              class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Duplicate</button>
+      <button @click="duplicateProfile()" :disabled="busy"
+              class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+        <template x-if="busy"><span class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span></template>
+        <span x-text="busy ? 'Duplicating…' : 'Duplicate'"></span>
+      </button>
     </div>
   </div>
 </div>
@@ -732,7 +882,7 @@
 <div x-show="showSegmentModal" x-cloak
      class="fixed inset-0 bg-black/40 modal-overlay flex items-center justify-center z-40"
      @keydown.escape.window="showSegmentModal = false">
-  <div class="bg-white rounded-xl shadow-2xl w-[520px] p-6" @click.stop>
+  <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-lg mx-4" @click.stop>
     <h2 class="text-base font-semibold mb-4">Add Segment</h2>
     <div class="space-y-3">
       <div>
@@ -788,8 +938,59 @@
     <div class="flex justify-end gap-2 mt-5">
       <button @click="showSegmentModal = false"
               class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
-      <button @click="addSegment()"
-              class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Add Segment</button>
+      <button @click="addSegment()" :disabled="busy"
+              class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+        <template x-if="busy"><span class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span></template>
+        <span x-text="busy ? 'Adding…' : 'Add Segment'"></span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: Edit Segment ===== -->
+<div x-show="showEditSegmentModal" x-cloak
+     class="fixed inset-0 bg-black/40 modal-overlay flex items-center justify-center z-40"
+     @keydown.escape.window="showEditSegmentModal = false">
+  <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm mx-4" @click.stop>
+    <h2 class="text-base font-semibold mb-4">
+      Edit Segment — <span class="font-mono text-blue-700" x-text="editSegment.segment"></span>
+    </h2>
+    <div class="space-y-3">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Description</label>
+        <input x-model="editSegment.description" placeholder="Optional description"
+               class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+      </div>
+      <div class="flex gap-2">
+        <div class="flex-1">
+          <label class="block text-xs text-gray-500 mb-1">Usage</label>
+          <select x-model="editSegment.usage"
+                  class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+            <template x-for="u in usageCodes" :key="u.code">
+              <option :value="u.code" x-text="u.code"></option>
+            </template>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Min</label>
+          <input x-model.number="editSegment.min" type="number" min="0"
+                 class="w-20 border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Max (* = unbounded)</label>
+          <input x-model="editSegment.max" placeholder="1 or *"
+                 class="w-20 border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+        </div>
+      </div>
+    </div>
+    <div class="flex justify-end gap-2 mt-5">
+      <button @click="showEditSegmentModal = false"
+              class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+      <button @click="saveEditSegment()" :disabled="busy"
+              class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+        <template x-if="busy"><span class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span></template>
+        <span x-text="busy ? 'Saving…' : 'Save'"></span>
+      </button>
     </div>
   </div>
 </div>
@@ -798,7 +999,7 @@
 <div x-show="fieldEditorOpen" x-cloak
      class="fixed inset-0 bg-black/40 modal-overlay flex items-center justify-center z-40"
      @keydown.escape.window="fieldEditorOpen = false">
-  <div class="bg-white rounded-xl shadow-2xl w-[580px] max-h-[90vh] overflow-y-auto p-6" @click.stop>
+  <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-xl mx-4 max-h-[90vh] overflow-y-auto" @click.stop>
     <h2 class="text-base font-semibold mb-4"
         x-text="editingField ? `Edit Field — ${selectedSegmentName}.${fieldForm.seq}` : 'Add Field'"></h2>
     <div class="space-y-3">
@@ -860,6 +1061,20 @@
         </div>
       </div>
 
+      <!-- Repeatable -->
+      <div class="flex items-center gap-3">
+        <label class="text-xs text-gray-500">Repeatable</label>
+        <button type="button"
+                @click="fieldForm.repeatable = !fieldForm.repeatable"
+                class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
+                :class="fieldForm.repeatable ? 'bg-teal-500' : 'bg-gray-200'">
+          <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
+                :class="fieldForm.repeatable ? 'translate-x-4' : 'translate-x-1'"></span>
+        </button>
+        <span class="text-xs" :class="fieldForm.repeatable ? 'text-teal-600 font-medium' : 'text-gray-400'"
+              x-text="fieldForm.repeatable ? 'Yes' : 'No'"></span>
+      </div>
+
       <!-- Length -->
       <div class="flex gap-2">
         <div class="flex-1">
@@ -912,8 +1127,120 @@
     <div class="flex justify-end gap-2 mt-5">
       <button @click="fieldEditorOpen = false"
               class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
-      <button @click="saveField()"
-              class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Save Field</button>
+      <button @click="saveField()" :disabled="busy"
+              class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+        <template x-if="busy"><span class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span></template>
+        <span x-text="busy ? 'Saving…' : 'Save Field'"></span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: Component Editor ===== -->
+<div x-show="componentEditorOpen" x-cloak
+     class="fixed inset-0 bg-black/40 modal-overlay flex items-center justify-center z-40"
+     @keydown.escape.window="componentEditorOpen = false">
+  <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-lg mx-4" @click.stop>
+    <h2 class="text-base font-semibold mb-4"
+        x-text="`Edit Component — ${selectedSegmentName}.${editingComponentFieldSeq}.${componentForm.seq}`"></h2>
+    <div class="space-y-3">
+
+      <!-- Seq + Name (read-only) -->
+      <div class="flex gap-2">
+        <div class="w-20">
+          <label class="block text-xs text-gray-500 mb-1">Seq</label>
+          <input :value="componentForm.seq" readonly
+                 class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm bg-gray-50 font-mono text-gray-500">
+        </div>
+        <div class="flex-1">
+          <label class="block text-xs text-gray-500 mb-1">Name</label>
+          <input x-model="componentForm.name"
+                 class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+        </div>
+      </div>
+
+      <!-- Datatype -->
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Data Type *</label>
+        <input x-model="compDtSearch" placeholder="Search datatype..."
+               class="w-full border border-gray-300 rounded-t px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+        <select x-model="componentForm.datatype" size="4"
+                class="w-full border border-gray-300 border-t-0 rounded-b text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white">
+          <template x-for="dt in filteredCompDatatypes" :key="dt.code">
+            <option :value="dt.code" x-text="`${dt.code} — ${dt.name}`"></option>
+          </template>
+        </select>
+        <div class="text-xs text-gray-400 mt-1">
+          Selected: <span class="font-mono font-semibold text-blue-700" x-text="componentForm.datatype"></span>
+          <span x-text="' — ' + datatypeName(componentForm.datatype)"></span>
+        </div>
+      </div>
+
+      <!-- Usage -->
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Usage *</label>
+        <div class="flex gap-2 flex-wrap">
+          <template x-for="u in usageCodes" :key="u.code">
+            <button type="button"
+                    @click="componentForm.usage = u.code"
+                    class="usage-pill"
+                    :class="{
+                      'active': componentForm.usage === u.code,
+                      'badge-R':  u.code === 'R',
+                      'badge-RE': u.code === 'RE',
+                      'badge-O':  u.code === 'O',
+                      'badge-C':  u.code === 'C',
+                      'badge-X':  u.code === 'X',
+                    }"
+                    :title="u.description"
+                    x-text="u.code">
+            </button>
+          </template>
+          <span class="text-xs text-gray-400 self-center" x-text="usageLabel(componentForm.usage)"></span>
+        </div>
+      </div>
+
+      <!-- Repeatable -->
+      <div class="flex items-center gap-3">
+        <label class="text-xs text-gray-500">Repeatable</label>
+        <button type="button"
+                @click="componentForm.repeatable = !componentForm.repeatable"
+                class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
+                :class="componentForm.repeatable ? 'bg-teal-500' : 'bg-gray-200'">
+          <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
+                :class="componentForm.repeatable ? 'translate-x-4' : 'translate-x-1'"></span>
+        </button>
+        <span class="text-xs" :class="componentForm.repeatable ? 'text-teal-600 font-medium' : 'text-gray-400'"
+              x-text="componentForm.repeatable ? 'Yes' : 'No'"></span>
+      </div>
+
+      <!-- Value Set -->
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Value Set</label>
+        <div class="flex gap-2">
+          <select x-model="componentForm.value_set"
+                  class="flex-1 border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+            <option value="">— none —</option>
+            <template x-for="(vs, vsName) in profileValueSets" :key="vsName">
+              <option :value="vsName" x-text="`${vsName} (${vs.codes.length} codes)`"></option>
+            </template>
+          </select>
+          <button type="button" @click="openValueSetEditor(null)"
+                  class="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-300">
+            + New VS
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex justify-end gap-2 mt-5">
+      <button @click="componentEditorOpen = false"
+              class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+      <button @click="saveComponent()" :disabled="busy"
+              class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+        <template x-if="busy"><span class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span></template>
+        <span x-text="busy ? 'Saving…' : 'Save Component'"></span>
+      </button>
     </div>
   </div>
 </div>
@@ -922,7 +1249,7 @@
 <div x-show="showValueSetModal" x-cloak
      class="fixed inset-0 bg-black/40 modal-overlay flex items-center justify-center z-50"
      @keydown.escape.window="showValueSetModal = false">
-  <div class="bg-white rounded-xl shadow-2xl w-[640px] max-h-[90vh] overflow-y-auto p-6" @click.stop>
+  <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto" @click.stop>
     <h2 class="text-base font-semibold mb-4"
         x-text="editingVsName ? `Edit Value Set — ${editingVsName}` : 'New Value Set'"></h2>
     <div class="space-y-3">
@@ -1000,8 +1327,11 @@
     <div class="flex justify-end gap-2 mt-5">
       <button @click="showValueSetModal = false"
               class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
-      <button @click="saveValueSet()"
-              class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Save Value Set</button>
+      <button @click="saveValueSet()" :disabled="busy"
+              class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+        <template x-if="busy"><span class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span></template>
+        <span x-text="busy ? 'Saving…' : 'Save Value Set'"></span>
+      </button>
     </div>
   </div>
 </div>
@@ -1009,7 +1339,7 @@
 <!-- ===== CONFIRM: Delete Profile ===== -->
 <div x-show="showDeleteProfileConfirm" x-cloak
      class="fixed inset-0 bg-black/40 modal-overlay flex items-center justify-center z-50">
-  <div class="bg-white rounded-xl shadow-2xl p-6 w-80">
+  <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-xs mx-4">
     <h3 class="text-sm font-semibold mb-2 text-red-600">Delete Profile</h3>
     <p class="text-sm text-gray-600 mb-4">
       Delete <strong x-text="selectedProfileId"></strong>? This will permanently delete the YAML file.
@@ -1017,8 +1347,11 @@
     <div class="flex justify-end gap-2">
       <button @click="showDeleteProfileConfirm = false"
               class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
-      <button @click="deleteProfile()"
-              class="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700">Delete</button>
+      <button @click="deleteProfile()" :disabled="busy"
+              class="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 flex items-center gap-2">
+        <template x-if="busy"><span class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span></template>
+        <span x-text="busy ? 'Deleting…' : 'Delete'"></span>
+      </button>
     </div>
   </div>
 </div>
@@ -1026,7 +1359,7 @@
 <!-- ===== CONFIRM: Delete Segment ===== -->
 <div x-show="showDeleteSegmentConfirm" x-cloak
      class="fixed inset-0 bg-black/40 modal-overlay flex items-center justify-center z-50">
-  <div class="bg-white rounded-xl shadow-2xl p-6 w-80">
+  <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-xs mx-4">
     <h3 class="text-sm font-semibold mb-2 text-red-600">Remove Segment</h3>
     <p class="text-sm text-gray-600 mb-4">
       Remove segment <strong x-text="deletingSegmentName"></strong> and all its fields?
@@ -1034,8 +1367,11 @@
     <div class="flex justify-end gap-2">
       <button @click="showDeleteSegmentConfirm = false"
               class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
-      <button @click="deleteSegment()"
-              class="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700">Remove</button>
+      <button @click="deleteSegment()" :disabled="busy"
+              class="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 flex items-center gap-2">
+        <template x-if="busy"><span class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span></template>
+        <span x-text="busy ? 'Removing…' : 'Remove'"></span>
+      </button>
     </div>
   </div>
 </div>
@@ -1043,7 +1379,7 @@
 <!-- ===== CONFIRM: Delete Field ===== -->
 <div x-show="showDeleteFieldConfirm" x-cloak
      class="fixed inset-0 bg-black/40 modal-overlay flex items-center justify-center z-50">
-  <div class="bg-white rounded-xl shadow-2xl p-6 w-80">
+  <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-xs mx-4">
     <h3 class="text-sm font-semibold mb-2 text-red-600">Delete Field</h3>
     <p class="text-sm text-gray-600 mb-4">
       Delete field <strong x-text="`${selectedSegmentName}.${deletingFieldSeq}`"></strong>?
@@ -1051,8 +1387,11 @@
     <div class="flex justify-end gap-2">
       <button @click="showDeleteFieldConfirm = false"
               class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
-      <button @click="deleteField()"
-              class="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700">Delete</button>
+      <button @click="deleteField()" :disabled="busy"
+              class="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 flex items-center gap-2">
+        <template x-if="busy"><span class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span></template>
+        <span x-text="busy ? 'Deleting…' : 'Delete'"></span>
+      </button>
     </div>
   </div>
 </div>
@@ -1060,7 +1399,7 @@
 <!-- ===== CONFIRM: Delete Selected Fields ===== -->
 <div x-show="showDeleteFieldsConfirm" x-cloak
      class="fixed inset-0 bg-black/40 modal-overlay flex items-center justify-center z-50">
-  <div class="bg-white rounded-xl shadow-2xl p-6 w-80">
+  <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-xs mx-4">
     <h3 class="text-sm font-semibold mb-2 text-red-600">Delete Fields</h3>
     <p class="text-sm text-gray-600 mb-4">
       Delete <strong x-text="selectedFieldSeqs.length"></strong> selected field(s) from
@@ -1069,8 +1408,11 @@
     <div class="flex justify-end gap-2">
       <button @click="showDeleteFieldsConfirm = false"
               class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
-      <button @click="deleteSelectedFields()"
-              class="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700">Delete all</button>
+      <button @click="deleteSelectedFields()" :disabled="busy"
+              class="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 flex items-center gap-2">
+        <template x-if="busy"><span class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span></template>
+        <span x-text="busy ? 'Deleting…' : 'Delete all'"></span>
+      </button>
     </div>
   </div>
 </div>

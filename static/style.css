@@ -80,4 +80,6 @@
     min-height: 50vh;
   }
   .panel-resizer { display: none; }
+  /* Field table scrolls horizontally on small screens */
+  .field-table-wrapper { overflow-x: auto; }
 }

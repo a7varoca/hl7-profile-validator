@@ -1,3 +1,6 @@
+import threading
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
@@ -6,11 +9,35 @@ from pathlib import Path
 
 from app.config import settings
 from app.routers import profiles, reference, validator, backup, hl7standard
+from app.services import db as profile_db
+from app.services import profile_service
+
+
+def _warm_cache() -> None:
+    """Pre-load all profiles into the in-memory cache."""
+    try:
+        summaries = profile_service.list_profiles()
+        for s in summaries:
+            try:
+                profile_service.get_profile(s.id)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    profile_db.init_db()
+    threading.Thread(target=_warm_cache, daemon=True).start()
+    yield
+
 
 app = FastAPI(
     title=settings.app_title,
     description="HL7 v2.x Profile Editor & Validator",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.include_router(profiles.router, prefix="/api/profiles", tags=["Profiles"])

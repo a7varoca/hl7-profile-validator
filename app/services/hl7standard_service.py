@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 import json
-import threading
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
-from pathlib import Path
 from typing import Any
 
-_cache_lock = threading.Lock()
-
-from app.config import settings
 from app.models.profile import (
+    ComponentDef,
     FieldDef,
     GroupDef,
     Profile,
@@ -21,31 +17,12 @@ from app.models.profile import (
     ValueCode,
     ValueSet,
 )
+from app.services import db
 from app.services.profile_service import _save
 
 _HL7_API_BASE = "https://hl7-definition.caristix.com/v2-api/1"
 
 HL7_VERSIONS = ["2.8", "2.7", "2.6", "2.5.1", "2.5", "2.4", "2.3.1", "2.3", "2.2", "2.1"]
-
-
-# ---------------------------------------------------------------------------
-# Cache helpers
-# ---------------------------------------------------------------------------
-
-def _cache_path(version: str, *parts: str) -> Path:
-    return settings.hl7standard_cache_dir / f"HL7v{version}" / Path(*parts)
-
-
-def _load_cache(path: Path) -> Any | None:
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
-    return None
-
-
-def _save_cache(path: Path, data: Any) -> None:
-    with _cache_lock:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -59,53 +36,63 @@ def _fetch(url: str) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# Raw API cache (SQLite-backed, replaces file-based hl7standard_cache/)
+# ---------------------------------------------------------------------------
+
+def _raw_get(version: str, resource_type: str, resource_id: str) -> Any | None:
+    return db.hl7_raw_get(f"HL7v{version}", resource_type, resource_id)
+
+
+def _raw_set(version: str, resource_type: str, resource_id: str, data: Any) -> None:
+    db.hl7_raw_set(f"HL7v{version}", resource_type, resource_id, data)
+
+
+# ---------------------------------------------------------------------------
+# Public API (cached)
 # ---------------------------------------------------------------------------
 
 def get_trigger_events(version: str) -> list[dict]:
-    cache = _cache_path(version, "TriggerEvents.json")
-    data = _load_cache(cache)
-    if data is None:
-        data = _fetch(f"{_HL7_API_BASE}/HL7v{version}/TriggerEvents")
-        _save_cache(cache, data)
+    cached = _raw_get(version, "root", "TriggerEvents")
+    if cached is not None:
+        return cached
+    data = _fetch(f"{_HL7_API_BASE}/HL7v{version}/TriggerEvents")
+    _raw_set(version, "root", "TriggerEvents", data)
     return data
 
 
 def get_trigger_event(version: str, event_id: str) -> dict:
-    cache = _cache_path(version, "trigger_events", f"{event_id}.json")
-    data = _load_cache(cache)
-    if data is None:
-        data = _fetch(f"{_HL7_API_BASE}/HL7v{version}/TriggerEvents/{event_id}")
-        _save_cache(cache, data)
+    cached = _raw_get(version, "trigger_events", event_id)
+    if cached is not None:
+        return cached
+    data = _fetch(f"{_HL7_API_BASE}/HL7v{version}/TriggerEvents/{event_id}")
+    _raw_set(version, "trigger_events", event_id, data)
     return data
 
 
 def get_segment(version: str, segment_name: str) -> dict:
-    cache = _cache_path(version, "segments", f"{segment_name}.json")
-    data = _load_cache(cache)
-    if data is None:
-        data = _fetch(f"{_HL7_API_BASE}/HL7v{version}/Segments/{segment_name}")
-        _save_cache(cache, data)
+    cached = _raw_get(version, "segments", segment_name)
+    if cached is not None:
+        return cached
+    data = _fetch(f"{_HL7_API_BASE}/HL7v{version}/Segments/{segment_name}")
+    _raw_set(version, "segments", segment_name, data)
     return data
 
 
 def get_field(version: str, field_id: str) -> dict:
-    """Fetch full field detail (includes description and tableId) for a single field."""
-    cache = _cache_path(version, "fields", f"{field_id}.json")
-    data = _load_cache(cache)
-    if data is None:
-        data = _fetch(f"{_HL7_API_BASE}/HL7v{version}/Fields/{field_id}")
-        _save_cache(cache, data)
+    cached = _raw_get(version, "fields", field_id)
+    if cached is not None:
+        return cached
+    data = _fetch(f"{_HL7_API_BASE}/HL7v{version}/Fields/{field_id}")
+    _raw_set(version, "fields", field_id, data)
     return data
 
 
 def get_table(version: str, table_id: str) -> dict:
-    """Fetch HL7 table (value set) by table ID."""
-    cache = _cache_path(version, "tables", f"{table_id}.json")
-    data = _load_cache(cache)
-    if data is None:
-        data = _fetch(f"{_HL7_API_BASE}/HL7v{version}/Tables/{table_id}")
-        _save_cache(cache, data)
+    cached = _raw_get(version, "tables", table_id)
+    if cached is not None:
+        return cached
+    data = _fetch(f"{_HL7_API_BASE}/HL7v{version}/Tables/{table_id}")
+    _raw_set(version, "tables", table_id, data)
     return data
 
 
@@ -129,35 +116,128 @@ def _map_max(rpt: str | None) -> int | str:
 
 
 def _vs_key(table_id: str, table_name: str) -> str:
-    """Derive a clean value set key from table ID and name."""
     name_slug = (table_name or "").strip().replace(" ", "_")
     return f"HL7T{table_id}_{name_slug}" if name_slug else f"HL7T{table_id}"
 
 
-def _fetch_field_data(version: str, f: dict) -> tuple[dict, str | None, str | None]:
-    """Fetch field detail + table for a single field entry. Returns (f, description, vs_key)."""
+def _fetch_table_vs_key(version: str, table_id: str | None) -> str | None:
+    if not table_id:
+        return None
+    try:
+        tbl = get_table(version, table_id)
+        if tbl.get("entries"):
+            return _vs_key(table_id, tbl.get("name", ""))
+    except Exception:
+        pass
+    return None
+
+
+def _fetch_field_data(version: str, f: dict) -> tuple:
     position = f.get("position", "")
     description: str | None = None
     vs_key: str | None = None
     table_id = f.get("tableId")
+    components_raw: list[dict] = []
 
     try:
         field_detail = get_field(version, position)
         description = field_detail.get("description") or None
         table_id = field_detail.get("tableId") or table_id
+        components_raw = field_detail.get("fields") or []
     except Exception:
         pass
 
     if table_id:
+        vs_key = _fetch_table_vs_key(version, table_id)
+
+    return f, description, vs_key, table_id, components_raw
+
+
+def _register_vs(
+    version: str,
+    table_id: str | None,
+    vs_key: str | None,
+    value_sets: dict[str, ValueSet],
+) -> str | None:
+    if not vs_key or not table_id or vs_key in value_sets:
+        return vs_key
+    try:
+        tbl = get_table(version, table_id)
+        entries = tbl.get("entries") or []
+        if entries:
+            value_sets[vs_key] = ValueSet(
+                description=tbl.get("name"),
+                codes=[
+                    ValueCode(
+                        code=e["value"],
+                        display=e.get("description") or e["value"],
+                        description=e.get("comment") or None,
+                    )
+                    for e in entries
+                    if e.get("value")
+                ],
+            )
+        else:
+            return None
+    except Exception:
+        return None
+    return vs_key
+
+
+def _build_components(
+    version: str,
+    components_raw: list[dict],
+    value_sets: dict[str, ValueSet],
+) -> list[ComponentDef]:
+    if not components_raw:
+        return []
+
+    def _fetch_component(c: dict) -> tuple[dict, str | None, str | None, list]:
+        position = c.get("position", "")
+        table_id = c.get("tableId")
+        sub_raw: list[dict] = []
         try:
-            tbl = get_table(version, table_id)
-            entries = tbl.get("entries") or []
-            if entries:
-                vs_key = _vs_key(table_id, tbl.get("name", ""))
+            detail = get_field(version, position)
+            table_id = detail.get("tableId") or table_id
+            sub_raw = detail.get("fields") or []
         except Exception:
             pass
+        vs_key = _fetch_table_vs_key(version, table_id)
+        return c, vs_key, table_id, sub_raw
 
-    return f, description, vs_key, table_id
+    comp_results = []
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = {ex.submit(_fetch_component, c): c for c in components_raw}
+        for fut in as_completed(futures):
+            try:
+                comp_results.append(fut.result())
+            except Exception:
+                pass
+
+    components = []
+    for c, vs_key, table_id, sub_raw in comp_results:
+        position = c.get("position", "")
+        try:
+            seq = int(position.split(".")[-1])
+        except (ValueError, IndexError):
+            continue
+
+        vs_key = _register_vs(version, table_id, vs_key, value_sets)
+        subcomponents = _build_components(version, sub_raw, value_sets) if sub_raw else []
+
+        rpt = c.get("rpt") or "1"
+        components.append(ComponentDef(
+            seq=seq,
+            name=c.get("name", ""),
+            datatype=c.get("dataType") or "ST",
+            usage=_map_usage(c.get("usage")),
+            repeatable=rpt not in ("1", "0", None),
+            value_set=vs_key,
+            components=subcomponents,
+        ))
+
+    components.sort(key=lambda cd: cd.seq)
+    return components
 
 
 def _build_fields(
@@ -165,7 +245,6 @@ def _build_fields(
     segment_name: str,
     value_sets: dict[str, ValueSet],
 ) -> list[FieldDef]:
-    """Build fields for a segment, fetching field details in parallel."""
     try:
         seg_data = get_segment(version, segment_name)
     except Exception:
@@ -185,65 +264,83 @@ def _build_fields(
                 pass
 
     fields = []
-    for f, description, vs_key, table_id in results:
+    for f, description, vs_key, table_id, components_raw in results:
         position = f.get("position", "")
         try:
             seq = int(position.split(".")[-1])
         except (ValueError, IndexError):
             continue
 
-        if vs_key and vs_key not in value_sets and table_id:
-            try:
-                tbl = get_table(version, table_id)
-                entries = tbl.get("entries") or []
-                if entries:
-                    value_sets[vs_key] = ValueSet(
-                        description=tbl.get("name"),
-                        codes=[
-                            ValueCode(
-                                code=e["value"],
-                                display=e.get("description") or e["value"],
-                                description=e.get("comment") or None,
-                            )
-                            for e in entries
-                            if e.get("value")
-                        ],
-                    )
-                else:
-                    vs_key = None
-            except Exception:
-                vs_key = None
+        vs_key = _register_vs(version, table_id, vs_key, value_sets)
+        components = _build_components(version, components_raw, value_sets)
 
+        rpt = f.get("rpt") or "1"
         fields.append(FieldDef(
             seq=seq,
             name=f.get("name", ""),
             datatype=f.get("dataType") or "ST",
             usage=_map_usage(f.get("usage")),
+            repeatable=rpt not in ("1", "0", None),
             min_length=f.get("length") or 0,
             max_length=f.get("length") or 999,
             value_set=vs_key,
+            components=components,
+            description=description,
         ))
 
     fields.sort(key=lambda fd: fd.seq)
     return fields
 
 
+# ---------------------------------------------------------------------------
+# Segment builder with SQLite cache
+# ---------------------------------------------------------------------------
+
 def _build_segment_node(version: str, item: dict, value_sets: dict[str, ValueSet]):
-    """Build a single SegmentDef (called in thread pool)."""
+    """Build a SegmentDef, using the segment cache if available."""
     seg_name = item.get("name") or item.get("id", "")
     if not seg_name:
         return None
+
     usage = _map_usage(item.get("usage"))
+
+    # Check segment cache — avoids rebuilding shared segments (PID, MSH, etc.)
+    cached = db.segment_cache_get(version, seg_name)
+    if cached is not None:
+        seg_data, cached_vs = cached
+        value_sets.update({
+            k: ValueSet(**v) if isinstance(v, dict) else v
+            for k, v in cached_vs.items()
+        })
+        seg_def = SegmentDef.model_validate(seg_data)
+        # Override usage/min/max from the trigger event (may differ per message)
+        seg_def.usage = usage
+        seg_def.min = 1 if usage == UsageCode.R else 0
+        seg_def.max = _map_max(item.get("rpt"))
+        return item, seg_def, {}
+
+    # Build from scratch
     local_vs: dict[str, ValueSet] = {}
     fields = _build_fields(version, seg_name, local_vs)
-    return item, SegmentDef(
+
+    seg_def = SegmentDef(
         segment=seg_name,
         usage=usage,
         min=1 if usage == UsageCode.R else 0,
         max=_map_max(item.get("rpt")),
         description=item.get("longName") or None,
         fields=fields,
-    ), local_vs
+    )
+
+    # Store in segment cache (serialise to plain dict for JSON storage)
+    db.segment_cache_set(
+        version,
+        seg_name,
+        seg_def.model_dump(mode="json"),
+        {k: v.model_dump(mode="json") for k, v in local_vs.items()},
+    )
+
+    return item, seg_def, local_vs
 
 
 def _build_structure(
@@ -251,11 +348,9 @@ def _build_structure(
     segments: list[dict],
     value_sets: dict[str, ValueSet],
 ) -> list:
-    # Separate groups from plain segments so we can parallelize plain segments
     plain_items = [(i, item) for i, item in enumerate(segments) if not item.get("isGroup")]
     group_items = [(i, item) for i, item in enumerate(segments) if item.get("isGroup")]
 
-    # Process plain segments in parallel
     seg_results: dict[int, SegmentDef] = {}
     if plain_items:
         with ThreadPoolExecutor(max_workers=10) as ex:
@@ -272,7 +367,6 @@ def _build_structure(
                 except Exception:
                     pass
 
-    # Process groups recursively (order preserved)
     group_results: dict[int, GroupDef] = {}
     for idx, item in group_items:
         children = _build_structure(version, item.get("segments") or [], value_sets)
@@ -284,7 +378,6 @@ def _build_structure(
             segments=children,
         )
 
-    # Reconstruct in original order
     nodes = []
     for i, item in enumerate(segments):
         if i in seg_results:

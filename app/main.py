@@ -8,7 +8,7 @@ from fastapi import Request
 from pathlib import Path
 
 from app.config import settings
-from app.routers import profiles, reference, validator, backup, hl7standard
+from app.routers import profiles, reference, validator, backup, hl7standard, shared_segments
 from app.services import db as profile_db
 from app.services import profile_service
 
@@ -45,6 +45,7 @@ app.include_router(reference.router, prefix="/api/reference", tags=["Reference"]
 app.include_router(validator.router, prefix="/api/validate", tags=["Validator"])
 app.include_router(backup.router, prefix="/api/backup", tags=["Backup"])
 app.include_router(hl7standard.router, prefix="/api/hl7standard", tags=["HL7Standard"])
+app.include_router(shared_segments.router, prefix="/api/shared-segments", tags=["SharedSegments"])
 
 static_dir = Path(__file__).parent.parent / "static"
 if static_dir.exists():

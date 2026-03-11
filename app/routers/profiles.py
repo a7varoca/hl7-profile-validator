@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import Response
+from typing import Optional
 from pydantic import BaseModel
 from app.models.profile import (
     Profile,
@@ -92,12 +93,30 @@ def delete_profile(profile_id: str):
 
 class DuplicateRequest(BaseModel):
     name: str
+    message_type: Optional[str] = None
+    trigger_event: Optional[str] = None
+
+
+class RenameRequest(BaseModel):
+    name: str
+    message_type: Optional[str] = None
+    trigger_event: Optional[str] = None
 
 
 @router.post("/{profile_id}/duplicate", response_model=Profile, status_code=201)
 def duplicate_profile(profile_id: str, req: DuplicateRequest):
     try:
-        return profile_service.duplicate_profile(profile_id, req.name)
+        return profile_service.duplicate_profile(profile_id, req.name, req.message_type, req.trigger_event)
+    except FileNotFoundError as e:
+        _not_found(e)
+    except ValueError as e:
+        _conflict(e)
+
+
+@router.post("/{profile_id}/rename", response_model=Profile)
+def rename_profile(profile_id: str, req: RenameRequest):
+    try:
+        return profile_service.rename_profile(profile_id, req.name, req.message_type, req.trigger_event)
     except FileNotFoundError as e:
         _not_found(e)
     except ValueError as e:
@@ -145,6 +164,20 @@ def delete_segment(profile_id: str, segment_name: str):
         return profile_service.delete_segment(profile_id, segment_name)
     except FileNotFoundError as e:
         _not_found(e)
+
+
+class MoveSegmentRequest(BaseModel):
+    direction: str  # first | up | down | last
+
+
+@router.post("/{profile_id}/segments/{segment_name}/move", response_model=Profile)
+def move_segment(profile_id: str, segment_name: str, req: MoveSegmentRequest):
+    try:
+        return profile_service.move_segment(profile_id, segment_name, req.direction)
+    except FileNotFoundError as e:
+        _not_found(e)
+    except ValueError as e:
+        _conflict(e)
 
 
 # ---------------------------------------------------------------------------

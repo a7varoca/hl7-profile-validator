@@ -81,9 +81,32 @@ function profileEditor() {
 
     showDuplicateModal: false,
     duplicateName: '',
+    duplicateMsgType: '',
+    duplicateTrigger: '',
+
+    showRenameModal: false,
+    renameName: '',
+    renameMsgType: '',
+    renameTrigger: '',
+
+    // ---- Shared segments library ----
+    sharedSegments: [],
+    sharedSegmentFilter: '',
+    showSharedPanel: false,
+    showSaveSharedModal: false,
+    saveSharedId: '',
+    saveSharedDesc: '',
+    get filteredSharedSegments() {
+      const q = this.sharedSegmentFilter.toLowerCase();
+      if (!q) return this.sharedSegments;
+      return this.sharedSegments.filter(s =>
+        s.id.toLowerCase().includes(q) || s.segment_name.toLowerCase().includes(q)
+      );
+    },
 
     showSegmentModal: false,
     newSegment: { segment: '', usage: 'O', min: 0, max: 1, description: '' },
+    segmentModalTab: 'new',  // 'new' | 'shared'
 
     showEditSegmentModal: false,
     editSegment: { segment: '', usage: 'O', min: 0, max: '*', description: '' },
@@ -97,7 +120,17 @@ function profileEditor() {
 
     fieldEditorOpen: false,
     editingField: null,  // null = new
-    fieldForm: { seq: null, name: '', datatype: 'ST', usage: 'O', repeatable: false, min_length: 0, max_length: 999, description: '', notes: '', value_set: '' },
+    fieldForm: { seq: null, name: '', datatype: 'ST', usage: 'O', repeatable: false, min_length: 0, max_length: 999, description: '', notes: '', value_set: '', format_pattern: '', format_preset: '' },
+    formatPresets: [
+      { label: 'DTM',      group: 'datetime', pattern: '\\d{8}(\\d{2}(\\d{2}(\\d{2})?)?)?([-+]\\d{4})?', description: 'HL7 date/time',     example: '20241231, 20241231143000, 20241231143000+0200' },
+      { label: 'DATE',     group: 'datetime', pattern: '\\d{8}',                                           description: 'Date only',          example: '20241231' },
+      { label: 'DATE-ISO', group: 'datetime', pattern: '\\d{4}-\\d{2}-\\d{2}',                             description: 'ISO date',           example: '2024-12-31' },
+      { label: 'TIME',     group: 'datetime', pattern: '\\d{4}(\\d{2})?',                                  description: 'Time HHMM[SS]',      example: '1430, 143000' },
+      { label: 'NM',       group: 'numeric',  pattern: '-?\\d+(\\.\\d+)?',                                 description: 'Number',             example: '42, -3.14, 0.5' },
+      { label: 'SI',       group: 'numeric',  pattern: '\\d+',                                             description: 'Positive integer',   example: '1, 99, 1000' },
+      { label: 'TN',       group: 'other',    pattern: '[0-9()+\\-. ]+',                                   description: 'Phone number',       example: '(123) 456-7890' },
+      { label: 'ID/IS',    group: 'other',    pattern: '[A-Za-z0-9_\\-]+',                                 description: 'Alphanumeric code',  example: 'ABC, 001, CODE-1' },
+    ],
 
     componentEditorOpen: false,
     editingComponentFieldSeq: null,
@@ -157,6 +190,7 @@ function profileEditor() {
     async init() {
       await this._loadReference();
       await this.loadProfiles();
+      await this.loadSharedSegments();
     },
 
     async _loadReference() {
@@ -303,13 +337,45 @@ function profileEditor() {
       if (!this.selectedProfileId) return;
       this.busy = true;
       try {
-        const p = await api.post(`/api/profiles/${this.selectedProfileId}/duplicate`, { name: this.duplicateName });
+        const p = await api.post(`/api/profiles/${this.selectedProfileId}/duplicate`, {
+          name: this.duplicateName,
+          message_type: this.duplicateMsgType || null,
+          trigger_event: this.duplicateTrigger || null,
+        });
         this.showDuplicateModal = false;
-        this.duplicateName = '';
+        this.duplicateName = ''; this.duplicateMsgType = ''; this.duplicateTrigger = '';
         await this.loadProfiles();
         this.selectedProfileId = p.profile.id;
         await this.loadProfile();
         this.toast(`Profile duplicated as ${p.profile.id}`, 'success');
+      } catch (e) { this.toast(e.message, 'error'); }
+      finally { this.busy = false; }
+    },
+
+    openRenameModal() {
+      if (!this.currentProfile) return;
+      this.renameMsgType = this.currentProfile.profile.message_type;
+      this.renameTrigger = this.currentProfile.profile.trigger_event;
+      const id = this.currentProfile.profile.id;
+      const base = `${this.renameMsgType}_${this.renameTrigger}`;
+      this.renameName = id.startsWith(base + '_') ? id.slice(base.length + 1) : '';
+      this.showRenameModal = true;
+    },
+
+    async renameProfile() {
+      if (!this.selectedProfileId) return;
+      this.busy = true;
+      try {
+        const p = await api.post(`/api/profiles/${this.selectedProfileId}/rename`, {
+          name: this.renameName,
+          message_type: this.renameMsgType || null,
+          trigger_event: this.renameTrigger || null,
+        });
+        this.showRenameModal = false;
+        await this.loadProfiles();
+        this.selectedProfileId = p.profile.id;
+        await this.loadProfile();
+        this.toast(`Profile renamed to ${p.profile.id}`, 'success');
       } catch (e) { this.toast(e.message, 'error'); }
       finally { this.busy = false; }
     },
@@ -411,6 +477,55 @@ function profileEditor() {
       finally { this.busy = false; }
     },
 
+    // ---- Shared segment library ----
+    async loadSharedSegments() {
+      try { this.sharedSegments = await api.get('/api/shared-segments/'); }
+      catch (e) { this.toast(e.message, 'error'); }
+    },
+
+    openSaveSharedModal() {
+      if (!this.selectedSegment) return;
+      this.saveSharedId = this.selectedSegment.segment;
+      this.saveSharedDesc = '';
+      this.showSaveSharedModal = true;
+    },
+
+    async saveAsShared() {
+      if (!this.saveSharedId.trim()) { this.toast('Name is required', 'error'); return; }
+      this.busy = true;
+      try {
+        await api.post(
+          `/api/shared-segments/from-profile/${this.selectedProfileId}/segments/${this.selectedSegmentName}`,
+          { shared_id: this.saveSharedId.trim(), description: this.saveSharedDesc || null }
+        );
+        await this.loadSharedSegments();
+        this.showSaveSharedModal = false;
+        this.toast(`Saved as shared: ${this.saveSharedId.trim()}`, 'success');
+      } catch (e) { this.toast(e.message, 'error'); }
+      finally { this.busy = false; }
+    },
+
+    async applySharedSegment(sharedId) {
+      if (!this.selectedProfileId) return;
+      this.busy = true;
+      try {
+        this.currentProfile = await api.post('/api/shared-segments/apply-to-profile/' + this.selectedProfileId, { shared_id: sharedId });
+        this._buildTree();
+        this.showSegmentModal = false;
+        this.toast(`Segment ${sharedId} applied`, 'success');
+      } catch (e) { this.toast(e.message, 'error'); }
+      finally { this.busy = false; }
+    },
+
+    async deleteSharedSegment(sharedId) {
+      if (!confirm(`Delete shared segment "${sharedId}"?`)) return;
+      try {
+        await api.delete(`/api/shared-segments/${sharedId}`);
+        this.sharedSegments = this.sharedSegments.filter(s => s.id !== sharedId);
+        this.toast(`Shared segment ${sharedId} deleted`, 'success');
+      } catch (e) { this.toast(e.message, 'error'); }
+    },
+
     openEditSegmentModal() {
       const seg = this.selectedSegment;
       if (!seg) return;
@@ -448,16 +563,44 @@ function profileEditor() {
       finally { this.busy = false; }
     },
 
+    async moveSegment(segmentName, direction) {
+      try {
+        this.currentProfile = await api.post(
+          `/api/profiles/${this.selectedProfileId}/segments/${segmentName}/move`,
+          { direction }
+        );
+        this._buildTree();
+      } catch (e) { this.toast(e.message, 'error'); }
+    },
+
     // ---- Field CRUD ----
-    openFieldEditor(field) {
+    async openFieldEditor(field) {
+      if (!Object.keys(this.profileValueSets).length) await this.loadValueSets();
       if (field) {
-        this.fieldForm = { ...field, value_set: field.value_set || '' };
+        const pattern = field.format_pattern || '';
+        const preset = this.formatPresets.find(p => p.pattern === pattern);
+        this.fieldForm = {
+          ...field,
+          value_set: field.value_set || '',
+          format_pattern: pattern,
+          format_preset: preset ? preset.label : (pattern ? '__custom__' : ''),
+        };
       } else {
-        this.fieldForm = { seq: null, name: '', datatype: 'ST', usage: 'O', repeatable: false, min_length: 0, max_length: 999, description: '', notes: '', value_set: '' };
+        this.fieldForm = { seq: null, name: '', datatype: 'ST', usage: 'O', repeatable: false, min_length: 0, max_length: 999, description: '', notes: '', value_set: '', format_pattern: '', format_preset: '' };
       }
       this.editingField = field;
       this.dtSearch = '';
       this.fieldEditorOpen = true;
+    },
+
+    onFormatPresetChange() {
+      const preset = this.formatPresets.find(p => p.label === this.fieldForm.format_preset);
+      if (preset) {
+        this.fieldForm.format_pattern = preset.pattern;
+      } else if (this.fieldForm.format_preset === '') {
+        this.fieldForm.format_pattern = '';
+      }
+      // '__custom__' → keep format_pattern as-is for user to edit
     },
 
     get filteredDatatypes() {
@@ -479,7 +622,8 @@ function profileEditor() {
         this.toast('Seq, Name and Datatype are required', 'error'); return;
       }
       this.busy = true;
-      const payload = { ...this.fieldForm, value_set: this.fieldForm.value_set || null };
+      const { format_preset, ...rest } = this.fieldForm;
+      const payload = { ...rest, value_set: rest.value_set || null, format_pattern: rest.format_pattern || null };
       try {
         this.currentProfile = await api.post(
           `/api/profiles/${this.selectedProfileId}/segments/${this.selectedSegmentName}/fields`,

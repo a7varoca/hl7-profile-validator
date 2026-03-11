@@ -72,6 +72,16 @@ def init_db() -> None:
     """Create tables and migrate any existing YAML profiles and file-based HL7 cache."""
     with _conn() as con:
         con.execute("""
+            CREATE TABLE IF NOT EXISTS shared_segments (
+                id           TEXT PRIMARY KEY,
+                segment_name TEXT NOT NULL,
+                description  TEXT,
+                updated_at   TEXT,
+                data         TEXT NOT NULL,
+                value_sets   TEXT NOT NULL DEFAULT '{}'
+            )
+        """)
+        con.execute("""
             CREATE TABLE IF NOT EXISTS profiles (
                 id            TEXT PRIMARY KEY,
                 message_type  TEXT NOT NULL DEFAULT '',
@@ -317,3 +327,64 @@ def segment_cache_set(version: str, segment_name: str, segment_data: dict, value
                 json.dumps(value_sets, ensure_ascii=False),
             ),
         )
+
+
+# ---------------------------------------------------------------------------
+# Shared segments library
+# ---------------------------------------------------------------------------
+
+def shared_list() -> list[dict]:
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT id, segment_name, description, updated_at FROM shared_segments ORDER BY id"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def shared_get(shared_id: str) -> dict | None:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT id, segment_name, description, updated_at, data, value_sets FROM shared_segments WHERE id=?",
+            (shared_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row["id"],
+        "segment_name": row["segment_name"],
+        "description": row["description"],
+        "updated_at": row["updated_at"],
+        "data": json.loads(row["data"]),
+        "value_sets": json.loads(row["value_sets"]),
+    }
+
+
+def shared_save(shared_id: str, segment_name: str, description: str | None,
+                updated_at: str, segment_data: dict, value_sets: dict) -> None:
+    with _conn(write=True) as con:
+        con.execute(
+            """INSERT INTO shared_segments (id, segment_name, description, updated_at, data, value_sets)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                 segment_name = excluded.segment_name,
+                 description  = excluded.description,
+                 updated_at   = excluded.updated_at,
+                 data         = excluded.data,
+                 value_sets   = excluded.value_sets""",
+            (shared_id, segment_name, description, updated_at,
+             json.dumps(segment_data, ensure_ascii=False),
+             json.dumps(value_sets, ensure_ascii=False)),
+        )
+
+
+def shared_delete(shared_id: str) -> None:
+    with _conn(write=True) as con:
+        cur = con.execute("DELETE FROM shared_segments WHERE id=?", (shared_id,))
+    if cur.rowcount == 0:
+        raise FileNotFoundError(f"Shared segment '{shared_id}' not found")
+
+
+def shared_exists(shared_id: str) -> bool:
+    with _conn() as con:
+        row = con.execute("SELECT 1 FROM shared_segments WHERE id=?", (shared_id,)).fetchone()
+    return row is not None

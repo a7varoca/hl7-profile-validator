@@ -143,18 +143,39 @@ def create_profile(req: ProfileCreateRequest) -> Profile:
     return _save(profile)
 
 
-def duplicate_profile(source_id: str, new_name: str) -> Profile:
+def duplicate_profile(source_id: str, new_name: str, message_type: str = None, trigger_event: str = None) -> Profile:
     source = _load(source_id)
+    msg_type = (message_type or source.profile.message_type).strip().upper()
+    trig = (trigger_event or source.profile.trigger_event).strip().upper()
     suffix = f"_{new_name.strip().replace(' ', '_')}" if new_name and new_name.strip() else "_copy"
-    base = f"{source.profile.message_type}_{source.profile.trigger_event}"
-    new_id = f"{base}{suffix}"
+    new_id = f"{msg_type}_{trig}{suffix}"
     if db.exists(new_id):
         raise ValueError(f"Profile '{new_id}' already exists")
+    import copy
+    dup = copy.deepcopy(source)
     today = _today()
-    source.profile.id = new_id
-    source.profile.created_at = today
-    source.profile.updated_at = today
-    return _save(source)
+    dup.profile.id = new_id
+    dup.profile.message_type = msg_type
+    dup.profile.trigger_event = trig
+    dup.profile.created_at = today
+    dup.profile.updated_at = today
+    return _save(dup)
+
+
+def rename_profile(profile_id: str, new_name: str, message_type: str = None, trigger_event: str = None) -> Profile:
+    profile = _load(profile_id)
+    msg_type = (message_type or profile.profile.message_type).strip().upper()
+    trig = (trigger_event or profile.profile.trigger_event).strip().upper()
+    suffix = f"_{new_name.strip().replace(' ', '_')}" if new_name and new_name.strip() else ""
+    new_id = f"{msg_type}_{trig}{suffix}"
+    if new_id != profile_id and db.exists(new_id):
+        raise ValueError(f"Profile '{new_id}' already exists")
+    db.delete(profile_id)
+    _profile_cache.pop(profile_id, None)
+    profile.profile.id = new_id
+    profile.profile.message_type = msg_type
+    profile.profile.trigger_event = trig
+    return _save(profile)
 
 
 def update_profile(profile_id: str, profile: Profile) -> Profile:
@@ -219,6 +240,46 @@ def delete_segment(profile_id: str, segment_name: str) -> Profile:
     return _save(profile)
 
 
+def _find_segment_index(
+    nodes: list[Union[SegmentDef, GroupDef]],
+    segment_name: str,
+) -> tuple[list, int] | None:
+    """Return (parent_list, index) for the first matching SegmentDef, searching recursively."""
+    for i, node in enumerate(nodes):
+        if isinstance(node, SegmentDef) and node.segment == segment_name:
+            return nodes, i
+        if isinstance(node, GroupDef):
+            result = _find_segment_index(node.segments, segment_name)
+            if result is not None:
+                return result
+    return None
+
+
+def move_segment(profile_id: str, segment_name: str, direction: str) -> Profile:
+    """Move a segment within its sibling list. direction: first|up|down|last."""
+    profile = _load(profile_id)
+    result = _find_segment_index(profile.structure, segment_name)
+    if result is None:
+        raise FileNotFoundError(f"Segment '{segment_name}' not found in profile '{profile_id}'")
+    siblings, idx = result
+    n = len(siblings)
+    if direction == "first":
+        new_idx = 0
+    elif direction == "up":
+        new_idx = max(0, idx - 1)
+    elif direction == "down":
+        new_idx = min(n - 1, idx + 1)
+    elif direction == "last":
+        new_idx = n - 1
+    else:
+        raise ValueError(f"Invalid direction '{direction}'")
+    if new_idx == idx:
+        return profile  # already at limit, nothing to save
+    item = siblings.pop(idx)
+    siblings.insert(new_idx, item)
+    return _save(profile)
+
+
 # ---------------------------------------------------------------------------
 # Field operations
 # ---------------------------------------------------------------------------
@@ -240,6 +301,7 @@ def upsert_field(profile_id: str, segment_name: str, req: FieldUpsertRequest) ->
         description=req.description,
         notes=req.notes,
         value_set=req.value_set,
+        format_pattern=req.format_pattern,
         components=req.components,
     )
     seg.fields.append(new_field)

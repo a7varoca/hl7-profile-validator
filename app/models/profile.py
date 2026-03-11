@@ -30,6 +30,7 @@ class ComponentDef(BaseModel):
     usage: UsageCode = UsageCode.O
     repeatable: bool = False
     value_set: Optional[str] = None  # references a key in profile.value_sets
+    format_pattern: Optional[str] = None  # regex pattern for value validation
     components: List["ComponentDef"] = Field(default_factory=list)  # subcomponents
 
 
@@ -47,6 +48,7 @@ class FieldDef(BaseModel):
     description: Optional[str] = None
     notes: Optional[str] = None
     value_set: Optional[str] = None  # references a key in profile.value_sets
+    format_pattern: Optional[str] = None  # regex pattern for value validation
     components: List["ComponentDef"] = Field(default_factory=list)
 
 
@@ -142,6 +144,7 @@ class FieldUpsertRequest(BaseModel):
     description: Optional[str] = None
     notes: Optional[str] = None
     value_set: Optional[str] = None
+    format_pattern: Optional[str] = None
     components: List[ComponentDef] = Field(default_factory=list)
 
 

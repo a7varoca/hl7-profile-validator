@@ -9,10 +9,23 @@ checking:
   - Value set membership (first component of CWE/IS/ID fields)
 """
 from __future__ import annotations
+import re
 from dataclasses import dataclass, field
 
 from app.models.profile import Profile, SegmentDef, GroupDef, UsageCode
 from app.models.validation import ValidationError, ValidationResult
+
+# Human-readable descriptions for known format patterns
+_FORMAT_LABELS: dict[str, str] = {
+    r'\d{8}(\d{2}(\d{2}(\d{2})?)?)?([-+]\d{4})?': 'HL7 date/time (YYYYMMDD[HH[MM[SS]]][±ZZZZ])',
+    r'\d{8}': 'date (YYYYMMDD)',
+    r'\d{4}-\d{2}-\d{2}': 'ISO date (YYYY-MM-DD)',
+    r'\d{4}(\d{2})?': 'time (HHMM[SS])',
+    r'-?\d+(\.\d+)?': 'number (e.g. 42, -3.14)',
+    r'\d+': 'positive integer',
+    r'[0-9()+\-. ]+': 'phone number',
+    r'[A-Za-z0-9_\-]+': 'alphanumeric code',
+}
 
 
 # ---------------------------------------------------------------------------
@@ -98,11 +111,43 @@ def validate(raw_message: str, profile: Profile) -> ValidationResult:
 
     segments_found = list(seg_index.keys())
 
-    # Extract MSH.9 message type
+    # Extract MSH.9 message type and validate against profile
     message_type = ''
     if 'MSH' in seg_index:
         raw_mt = _get_field_raw(seg_index['MSH'][0], 9)
-        message_type = raw_mt.split(component_sep)[0] + ('^' + raw_mt.split(component_sep)[1] if len(raw_mt.split(component_sep)) > 1 else '')
+        parts_mt = raw_mt.split(component_sep)
+        msg_code = parts_mt[0] if parts_mt else ''
+        trigger = parts_mt[1] if len(parts_mt) > 1 else ''
+        message_type = msg_code + ('^' + trigger if trigger else '')
+
+        expected_type = profile.profile.message_type
+        expected_trigger = profile.profile.trigger_event
+        if msg_code and expected_type and msg_code != expected_type:
+            errors.append(ValidationError(
+                severity='ERROR',
+                segment='MSH',
+                field='MSH.9',
+                seq=9,
+                value=message_type,
+                rule='MESSAGE_TYPE_MISMATCH',
+                message=(
+                    f"Message type '{msg_code}' does not match profile "
+                    f"(expected '{expected_type}')"
+                ),
+            ))
+        elif trigger and expected_trigger and trigger != expected_trigger:
+            errors.append(ValidationError(
+                severity='ERROR',
+                segment='MSH',
+                field='MSH.9',
+                seq=9,
+                value=message_type,
+                rule='TRIGGER_EVENT_MISMATCH',
+                message=(
+                    f"Trigger event '{trigger}' does not match profile "
+                    f"(expected '{expected_trigger}')"
+                ),
+            ))
 
     # Collect all segment names defined in profile
     profile_segments: set[str] = set()
@@ -310,3 +355,143 @@ def _validate_segment(
                                 f"(allowed: {', '.join(sorted(allowed))})"
                             ),
                         ))
+
+            # Format pattern check
+            if field_def.format_pattern:
+                try:
+                    if not re.fullmatch(field_def.format_pattern, raw_val):
+                        fmt_label = _FORMAT_LABELS.get(field_def.format_pattern, f'/{field_def.format_pattern}/')
+                        errors.append(ValidationError(
+                            severity='ERROR',
+                            segment=seg_def.segment,
+                            field=field_ref,
+                            seq=field_def.seq,
+                            value=raw_val,
+                            rule='INVALID_FORMAT',
+                            message=(
+                                f"{field_ref} ({field_def.name}): "
+                                f"value '{raw_val}' does not match expected format "
+                                f"{fmt_label}"
+                            ),
+                        ))
+                except re.error:
+                    pass  # invalid regex in profile — skip silently
+
+            # Component-level validation (recurse into subcomponents too)
+            if field_def.components:
+                _validate_components(
+                    field_def.components, raw_val,
+                    field_ref, seg_def.segment, field_def.seq,
+                    profile, component_sep, '&', errors, warnings,
+                )
+
+
+def _validate_components(
+    comp_defs,
+    parent_raw: str,
+    parent_ref: str,
+    segment: str,
+    field_seq: int,
+    profile,
+    component_sep: str,
+    subcomponent_sep: str,
+    errors: list,
+    warnings: list,
+):
+    """
+    Validate components (and recursively subcomponents) of a field value.
+
+    parent_raw   — raw value of the parent field or component
+    component_sep — separator used at this level (^ for field→component, & for component→subcomponent)
+    """
+    parts = parent_raw.split(component_sep)
+
+    for comp_def in comp_defs:
+        idx = comp_def.seq - 1  # 1-based → 0-based
+        comp_val = parts[idx].strip() if idx < len(parts) else ''
+        comp_ref = f"{parent_ref}.{comp_def.seq}"
+
+        # Usage R: must be present
+        if comp_def.usage == UsageCode.R:
+            if not comp_val:
+                errors.append(ValidationError(
+                    severity='ERROR',
+                    segment=segment,
+                    field=comp_ref,
+                    seq=field_seq,
+                    value='',
+                    rule='COMPONENT_REQUIRED',
+                    message=f"{comp_ref} ({comp_def.name}) is required but missing or empty",
+                ))
+                continue
+
+        # Usage X: must NOT be populated
+        elif comp_def.usage == UsageCode.X:
+            if comp_val:
+                errors.append(ValidationError(
+                    severity='ERROR',
+                    segment=segment,
+                    field=comp_ref,
+                    seq=field_seq,
+                    value=comp_val,
+                    rule='COMPONENT_NOT_SUPPORTED',
+                    message=(
+                        f"{comp_ref} ({comp_def.name}) must not be populated "
+                        f"(usage=X) but has value '{comp_val}'"
+                    ),
+                ))
+            continue
+
+        if not comp_val:
+            continue  # empty optional component — no further checks
+
+        # Value set check
+        if comp_def.value_set and comp_def.value_set in profile.value_sets:
+            vs = profile.value_sets[comp_def.value_set]
+            allowed = {c.code for c in vs.codes}
+            check_val = comp_val.split(subcomponent_sep)[0].strip()
+            if check_val and check_val not in allowed:
+                errors.append(ValidationError(
+                    severity='ERROR',
+                    segment=segment,
+                    field=comp_ref,
+                    seq=field_seq,
+                    value=comp_val,
+                    rule='INVALID_CODE',
+                    message=(
+                        f"{comp_ref} ({comp_def.name}): "
+                        f"value '{check_val}' not in value set "
+                        f"{comp_def.value_set} "
+                        f"(allowed: {', '.join(sorted(allowed))})"
+                    ),
+                ))
+
+        # Format pattern check
+        if comp_def.format_pattern:
+            try:
+                if not re.fullmatch(comp_def.format_pattern, comp_val):
+                    fmt_label = _FORMAT_LABELS.get(comp_def.format_pattern, f'/{comp_def.format_pattern}/')
+                    errors.append(ValidationError(
+                        severity='ERROR',
+                        segment=segment,
+                        field=comp_ref,
+                        seq=field_seq,
+                        value=comp_val,
+                        rule='INVALID_FORMAT',
+                        message=(
+                            f"{comp_ref} ({comp_def.name}): "
+                            f"value '{comp_val}' does not match expected format "
+                            f"{fmt_label}"
+                        ),
+                    ))
+            except re.error:
+                pass
+
+        # Recurse into subcomponents
+        if comp_def.components:
+            _validate_components(
+                comp_def.components, comp_val,
+                comp_ref, segment, field_seq,
+                profile, subcomponent_sep, subcomponent_sep,
+                errors, warnings,
+            )

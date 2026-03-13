@@ -906,7 +906,9 @@ function profileEditor() {
     // Split textarea/file content into individual HL7 messages
     _splitMessages(text) {
       return text
-        .split(/\n[ \t]*\n/)          // one or more blank lines as separator
+        .replace(/\r\n/g, '\n')       // normalize CRLF → LF
+        .replace(/\r/g, '\n')         // normalize bare CR → LF
+        .split(/\n[ \t]*\n+/)         // one or more blank lines as separator
         .map(b => b.trim())
         .filter(b => b.length > 0);
     },

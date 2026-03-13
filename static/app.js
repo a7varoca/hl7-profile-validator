@@ -1164,6 +1164,177 @@ function profileEditor() {
       setTimeout(() => URL.revokeObjectURL(url), 60000);
     },
 
+    exportBatchReportPdf() {
+      const b = this.batchResult;
+      if (!b) return;
+
+      const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const now = new Date().toLocaleString();
+
+      // Helpers shared with single-message PDF
+      const renderMsgBlock = (rawText, result) => {
+        if (!result) return `<div class="msg-block">${esc(rawText)}</div>`;
+        const errorFields = new Set(result.errors.map(e => e.field));
+        const warnFields  = new Set(result.warnings.map(w => w.field));
+        const errorSegs   = new Set(result.errors.map(e => e.segment));
+        const warnSegs    = new Set(result.warnings.map(w => w.segment));
+        const highlightSeg = (segName, rawLine) => {
+          const parts = rawLine.split('|');
+          return parts.map((val, idx) => {
+            const fieldRef = idx === 0 ? segName : `${segName}.${idx}`;
+            const escaped  = esc(val);
+            if (errorFields.has(fieldRef)) return `<span class="hl-error">${escaped}</span>`;
+            if (warnFields.has(fieldRef))  return `<span class="hl-warn">${escaped}</span>`;
+            return escaped;
+          }).join('<span class="pipe">|</span>');
+        };
+        const lines = rawText.trim().split(/\r?\n/).filter(l => l.trim());
+        const linesHtml = lines.map(line => {
+          const segName = line.split('|')[0];
+          const cls = errorSegs.has(segName) ? 'seg-error' : warnSegs.has(segName) ? 'seg-warn' : 'seg-ok';
+          return `<div class="seg-line ${cls}">${highlightSeg(segName, line)}</div>`;
+        }).join('');
+        return `<div class="msg-block">${linesHtml}</div>`;
+      };
+
+      const renderIssues = (result) => {
+        if (!result) return '';
+        const allIssues = [...result.errors, ...result.warnings]
+          .sort((a,b) => a.segment.localeCompare(b.segment) || a.seq - b.seq);
+        if (!allIssues.length) return '<p style="color:#16a34a;margin:6px 0 0">All profile rules passed.</p>';
+        const bySegMap = {};
+        allIssues.forEach(i => { (bySegMap[i.segment] = bySegMap[i.segment] || []).push(i); });
+        return Object.entries(bySegMap).map(([seg, issues]) => `
+          <div class="issue-group">
+            <div class="issue-seg-header">${esc(seg)}</div>
+            ${issues.map(i => `
+              <div class="issue-row ${i.severity === 'ERROR' ? 'issue-error' : 'issue-warn'}">
+                <span class="issue-badge">${esc(i.severity)}</span>
+                <span class="issue-field">${esc(i.seq > 0 ? i.field : i.segment)}</span>
+                <span class="issue-rule">${esc(i.rule)}</span>
+                <span class="issue-msg">${esc(i.message)}</span>
+                ${i.value ? `<span class="issue-val">Value: <code>${esc(i.value)}</code></span>` : ''}
+              </div>`).join('')}
+          </div>`).join('');
+      };
+
+      // Per-message sections
+      const messagesHtml = b.results.map(item => {
+        const isValid = item.valid_format && item.result && item.result.is_valid;
+        const statusColor = !item.valid_format || item.error ? '#d97706' : (isValid ? '#16a34a' : '#dc2626');
+        const statusText  = !item.valid_format ? 'FORMAT ERROR' : (item.error ? 'ERROR' : (isValid ? 'VALID' : `INVALID — ${item.result.error_count} error(s)`));
+        const rawText = item.raw_preview.length >= 79
+          ? this._splitMessages(this.validatorMessage)[item.index] || item.raw_preview
+          : item.raw_preview;
+        return `
+          <div class="msg-section">
+            <div class="msg-header">
+              <span class="msg-num">#${item.index + 1}</span>
+              <span class="msg-status" style="background:${statusColor}">${statusText}</span>
+              ${item.result ? `<span class="msg-meta">HL7 v${esc(item.result.hl7_version)} &nbsp;·&nbsp; ${esc(item.result.message_type || '—')}</span>` : ''}
+            </div>
+            ${renderMsgBlock(rawText, item.result || null)}
+            ${!item.valid_format || item.error
+              ? `<p class="issue-warn" style="padding:6px 10px;border-radius:4px;margin-top:6px;font-size:11px">${esc(item.error)}</p>`
+              : `<div style="margin-top:8px">${renderIssues(item.result)}</div>`
+            }
+          </div>`;
+      }).join('');
+
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Batch Validation Report — ${esc(b.profile_id)}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #1f2937; padding: 32px; }
+  @media print { body { padding: 16px; } .msg-section { page-break-inside: avoid; } }
+  h1 { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+  .meta { color: #6b7280; font-size: 11px; margin-bottom: 20px; }
+  .summary-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 28px; }
+  .summary-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 14px; }
+  .summary-card .label { font-size: 10px; color: #9ca3af; text-transform: uppercase; letter-spacing: .05em; }
+  .summary-card .value { font-size: 16px; font-weight: 700; margin-top: 2px; }
+  .msg-section { border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px 16px; margin-bottom: 20px; }
+  .msg-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+  .msg-num { font-size: 13px; font-weight: 700; color: #374151; }
+  .msg-status { font-size: 10px; font-weight: 700; color: white; padding: 2px 8px; border-radius: 4px; }
+  .msg-meta { font-size: 10px; color: #9ca3af; font-family: monospace; }
+  h2 { font-size: 13px; font-weight: 700; border-bottom: 2px solid #e5e7eb;
+       padding-bottom: 4px; margin: 24px 0 12px; text-transform: uppercase; letter-spacing: .05em; color: #374151; }
+  .msg-block { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;
+               padding: 10px 14px; font-family: 'Courier New', monospace; font-size: 10px; line-height: 1.8; }
+  .seg-line { margin-bottom: 2px; }
+  .seg-error { background: #fef2f2; border-left: 3px solid #ef4444; padding-left: 6px; border-radius: 2px; }
+  .seg-warn  { background: #fffbeb; border-left: 3px solid #f59e0b; padding-left: 6px; border-radius: 2px; }
+  .seg-ok    { padding-left: 9px; }
+  .pipe { color: #9ca3af; }
+  .hl-error { background: #fee2e2; color: #991b1b; border-radius: 2px; padding: 0 2px; font-weight: 600; }
+  .hl-warn  { background: #fef3c7; color: #92400e; border-radius: 2px; padding: 0 2px; font-weight: 600; }
+  .issue-group { margin-bottom: 10px; }
+  .issue-seg-header { font-family: monospace; font-weight: 700; font-size: 11px;
+                      background: #f3f4f6; padding: 3px 10px; border-radius: 4px; margin-bottom: 3px; }
+  .issue-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px;
+               padding: 4px 10px; border-radius: 4px; margin-bottom: 2px; font-size: 11px; }
+  .issue-error { background: #fef2f2; border-left: 3px solid #ef4444; }
+  .issue-warn  { background: #fffbeb; border-left: 3px solid #f59e0b; }
+  .issue-badge { font-weight: 700; font-size: 10px; padding: 1px 6px; border-radius: 3px; color: white; flex-shrink: 0; }
+  .issue-error .issue-badge { background: #ef4444; }
+  .issue-warn  .issue-badge { background: #f59e0b; }
+  .issue-field { font-family: monospace; font-weight: 600; color: #1d4ed8; }
+  .issue-rule  { font-family: monospace; font-size: 10px; color: #6b7280; background: #f3f4f6; padding: 1px 5px; border-radius: 3px; }
+  .issue-msg   { flex: 1; color: #374151; }
+  .issue-val   { width: 100%; margin-top: 2px; color: #9ca3af; }
+  .issue-val code { background: #f3f4f6; padding: 0 4px; border-radius: 3px; color: #374151; }
+  .footer { margin-top: 32px; font-size: 10px; color: #d1d5db; border-top: 1px solid #f3f4f6; padding-top: 8px; }
+  .legend { display: flex; gap: 16px; margin-bottom: 8px; font-size: 10px; }
+  .legend-item { display: flex; align-items: center; gap: 4px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+</style>
+</head>
+<body>
+  <h1>HL7 Batch Validation Report</h1>
+  <div class="meta">Generated: ${now}</div>
+
+  <div class="summary-grid">
+    <div class="summary-card">
+      <div class="label">Profile</div>
+      <div class="value" style="font-size:11px;font-family:monospace">${esc(b.profile_id)}</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">Total messages</div>
+      <div class="value">${b.total}</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">Valid</div>
+      <div class="value" style="color:${b.valid === b.total ? '#16a34a' : '#374151'}">${b.valid}</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">Invalid / Errors</div>
+      <div class="value" style="color:${b.invalid + b.format_errors > 0 ? '#dc2626' : '#16a34a'}">${b.invalid + b.format_errors}</div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#fee2e2;border-left:3px solid #ef4444"></div> Error</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#fef3c7;border-left:3px solid #f59e0b"></div> Warning</div>
+  </div>
+
+  <h2>Messages</h2>
+  ${messagesHtml}
+
+  <div class="footer">HL7 Profile Validator &nbsp;·&nbsp; ${esc(b.profile_id)} &nbsp;·&nbsp; ${now}</div>
+</body>
+</html>`;
+
+      const blob = new Blob([html], { type: 'text/html' });
+      const url  = URL.createObjectURL(blob);
+      const win  = window.open(url, '_blank');
+      win.addEventListener('load', () => { win.focus(); win.print(); });
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    },
+
     loadSampleMessage() {
       const p = this.profiles.find(x => x.id === this.validatorProfileId);
       if (!p) return;

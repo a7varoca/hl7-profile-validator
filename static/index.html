@@ -764,6 +764,14 @@
       <template x-if="batchResult">
         <div class="p-6">
 
+          <!-- Toolbar -->
+          <div class="flex justify-end mb-3">
+            <button @click="exportBatchReportPdf()"
+                    class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded hover:bg-gray-50 text-gray-600">
+              &#x2193; Export PDF
+            </button>
+          </div>
+
           <!-- Batch summary banner -->
           <div class="rounded-xl p-4 mb-6 border"
                :class="batchResult.format_errors > 0 || batchResult.invalid > 0 ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'">

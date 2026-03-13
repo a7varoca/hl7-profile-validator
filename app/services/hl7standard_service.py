@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date
 from typing import Any
 
 from app.models.profile import (
@@ -18,7 +17,7 @@ from app.models.profile import (
     ValueSet,
 )
 from app.services import db
-from app.services.profile_service import _save
+from app.services.profile_service import _save, _today, _generate_profile_id
 
 _HL7_API_BASE = "https://hl7-definition.caristix.com/v2-api/1"
 
@@ -99,6 +98,19 @@ def get_table(version: str, table_id: str) -> dict:
 # ---------------------------------------------------------------------------
 # Mapping helpers
 # ---------------------------------------------------------------------------
+
+def _parallel_fetch(items: list, fetch_fn, max_workers: int = 10) -> list:
+    """Execute fetch_fn(item) for each item concurrently; silently skip failures."""
+    results = []
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(fetch_fn, item): item for item in items}
+        for fut in as_completed(futures):
+            try:
+                results.append(fut.result())
+            except Exception:
+                pass
+    return results
+
 
 def _map_usage(raw: str | None) -> UsageCode:
     mapping = {"R": UsageCode.R, "RE": UsageCode.RE, "O": UsageCode.O,
@@ -205,14 +217,7 @@ def _build_components(
         vs_key = _fetch_table_vs_key(version, table_id)
         return c, vs_key, table_id, sub_raw
 
-    comp_results = []
-    with ThreadPoolExecutor(max_workers=10) as ex:
-        futures = {ex.submit(_fetch_component, c): c for c in components_raw}
-        for fut in as_completed(futures):
-            try:
-                comp_results.append(fut.result())
-            except Exception:
-                pass
+    comp_results = _parallel_fetch(components_raw, _fetch_component, max_workers=10)
 
     components = []
     for c, vs_key, table_id, sub_raw in comp_results:
@@ -254,14 +259,7 @@ def _build_fields(
     if not raw_fields:
         return []
 
-    results: list[tuple] = []
-    with ThreadPoolExecutor(max_workers=20) as ex:
-        futures = {ex.submit(_fetch_field_data, version, f): f for f in raw_fields}
-        for fut in as_completed(futures):
-            try:
-                results.append(fut.result())
-            except Exception:
-                pass
+    results = _parallel_fetch(raw_fields, lambda f: _fetch_field_data(version, f), max_workers=20)
 
     fields = []
     for f, description, vs_key, table_id, components_raw in results:
@@ -353,19 +351,16 @@ def _build_structure(
 
     seg_results: dict[int, SegmentDef] = {}
     if plain_items:
-        with ThreadPoolExecutor(max_workers=10) as ex:
-            futures = {ex.submit(_build_segment_node, version, item, value_sets): idx
-                       for idx, item in plain_items}
-            for fut in as_completed(futures):
-                idx = futures[fut]
-                try:
-                    result = fut.result()
-                    if result:
-                        _, seg_def, local_vs = result
-                        seg_results[idx] = seg_def
-                        value_sets.update(local_vs)
-                except Exception:
-                    pass
+        built = _parallel_fetch(
+            plain_items,
+            lambda t: (t[0], _build_segment_node(version, t[1], value_sets)),
+            max_workers=10,
+        )
+        for idx, result in built:
+            if result:
+                _, seg_def, local_vs = result
+                seg_results[idx] = seg_def
+                value_sets.update(local_vs)
 
     group_results: dict[int, GroupDef] = {}
     for idx, item in group_items:
@@ -404,14 +399,14 @@ def build_profile_from_standard(
     message_type = parts[0]
     trigger_event = parts[1] if len(parts) > 1 else event_id
 
-    base_id = f"{message_type}_{trigger_event}"
-    suffix = f"_{name.strip().replace(' ', '_')}" if name and name.strip() else ""
-    profile_id = f"{base_id}{suffix}"
+    profile_id = _generate_profile_id(message_type, trigger_event, name)
+    if db.exists(profile_id):
+        raise ValueError(f"Profile '{profile_id}' already exists")
 
     value_sets: dict[str, ValueSet] = {}
     structure = _build_structure(version, event.get("segments") or [], value_sets)
 
-    today = str(date.today())
+    today = _today()
     profile = Profile(
         profile=ProfileMetadata(
             id=profile_id,

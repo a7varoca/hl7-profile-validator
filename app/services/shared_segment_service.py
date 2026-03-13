@@ -3,14 +3,25 @@ Shared segment library — save/load named segment definitions reusable across p
 """
 from __future__ import annotations
 import copy
-from datetime import date
 
 from app.models.profile import SegmentDef, ValueSet
 from app.services import db
+from app.services.profile_service import _today
 
 
-def _today() -> str:
-    return date.today().isoformat()
+def collect_referenced_value_sets(segment_def) -> set[str]:
+    """Recursively collect all value set names referenced by a segment's fields/components."""
+    refs: set[str] = set()
+    for f in segment_def.fields:
+        if f.value_set:
+            refs.add(f.value_set)
+        for c in f.components:
+            if c.value_set:
+                refs.add(c.value_set)
+            for sc in c.components:
+                if sc.value_set:
+                    refs.add(sc.value_set)
+    return refs
 
 
 def list_shared() -> list[dict]:
@@ -59,9 +70,6 @@ def apply_shared_to_profile(profile_id: str, shared_id: str) -> "Profile":
 
     # Remove existing segment with same name (will be replaced)
     from app.models.profile import GroupDef
-    def _remove(nodes):
-        return [n for n in nodes if not (isinstance(n, SegmentDef) and n.segment == seg_def.segment)]
-
     def _remove_recursive(nodes):
         result = []
         for n in nodes:

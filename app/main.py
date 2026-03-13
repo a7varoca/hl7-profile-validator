@@ -1,9 +1,9 @@
 import threading
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse
 from fastapi import Request
 from pathlib import Path
 
@@ -68,6 +68,6 @@ def serve_spa():
 @app.get("/{full_path:path}", response_class=FileResponse, include_in_schema=False)
 def spa_fallback(full_path: str):
     index = static_dir / "index.html"
-    if index.exists():
-        return str(index)
+    if not index.exists():
+        raise HTTPException(status_code=404, detail="index.html not found")
     return FileResponse(str(index))

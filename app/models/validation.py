@@ -28,3 +28,25 @@ class ValidationResult(BaseModel):
 class ValidateRequest(BaseModel):
     profile_id: str
     message: str            # raw HL7 v2.x pipe-delimited message
+
+
+class BatchMessageResult(BaseModel):
+    index: int
+    raw_preview: str        # first ~80 chars of the message for identification
+    valid_format: bool      # False if block doesn't start with MSH|
+    result: Optional[ValidationResult] = None
+    error: Optional[str] = None  # format error description
+
+
+class BatchValidateRequest(BaseModel):
+    profile_id: str
+    messages: list[str]     # list of raw HL7 messages
+
+
+class BatchValidationSummary(BaseModel):
+    profile_id: str
+    total: int
+    valid: int
+    invalid: int
+    format_errors: int
+    results: list[BatchMessageResult]

@@ -1,5 +1,7 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import Response
+from functools import wraps
+from inspect import iscoroutinefunction
 from typing import Optional
 from pydantic import BaseModel
 from app.models.profile import (
@@ -18,12 +20,27 @@ from app.services import profile_service
 router = APIRouter()
 
 
-def _not_found(e: Exception):
-    raise HTTPException(status_code=404, detail=str(e))
+def _handle_errors(fn):
+    if iscoroutinefunction(fn):
+        @wraps(fn)
+        async def async_wrapper(*args, **kwargs):
+            try:
+                return await fn(*args, **kwargs)
+            except FileNotFoundError as e:
+                raise HTTPException(status_code=404, detail=str(e))
+            except ValueError as e:
+                raise HTTPException(status_code=409, detail=str(e))
+        return async_wrapper
 
-
-def _conflict(e: Exception):
-    raise HTTPException(status_code=409, detail=str(e))
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+    return wrapper
 
 
 # ---------------------------------------------------------------------------
@@ -36,11 +53,9 @@ def list_profiles():
 
 
 @router.post("/", response_model=Profile, status_code=201)
+@_handle_errors
 def create_profile(req: ProfileCreateRequest):
-    try:
-        return profile_service.create_profile(req)
-    except ValueError as e:
-        _conflict(e)
+    return profile_service.create_profile(req)
 
 
 @router.get("/import", include_in_schema=False)
@@ -58,37 +73,29 @@ async def import_profile(file: UploadFile = File(...)):
 
 
 @router.get("/{profile_id}/slim", response_model=ProfileSlim)
+@_handle_errors
 def get_profile_slim(profile_id: str):
     """Profile without value_sets — fast initial load."""
-    try:
-        p = profile_service.get_profile(profile_id)
-        return ProfileSlim(profile=p.profile, structure=p.structure)
-    except FileNotFoundError as e:
-        _not_found(e)
+    p = profile_service.get_profile(profile_id)
+    return ProfileSlim(profile=p.profile, structure=p.structure)
 
 
 @router.get("/{profile_id}", response_model=Profile)
+@_handle_errors
 def get_profile(profile_id: str):
-    try:
-        return profile_service.get_profile(profile_id)
-    except FileNotFoundError as e:
-        _not_found(e)
+    return profile_service.get_profile(profile_id)
 
 
 @router.put("/{profile_id}", response_model=Profile)
+@_handle_errors
 def update_profile(profile_id: str, profile: Profile):
-    try:
-        return profile_service.update_profile(profile_id, profile)
-    except FileNotFoundError as e:
-        _not_found(e)
+    return profile_service.update_profile(profile_id, profile)
 
 
 @router.delete("/{profile_id}", status_code=204)
+@_handle_errors
 def delete_profile(profile_id: str):
-    try:
-        profile_service.delete_profile(profile_id)
-    except FileNotFoundError as e:
-        _not_found(e)
+    profile_service.delete_profile(profile_id)
 
 
 class DuplicateRequest(BaseModel):
@@ -104,31 +111,21 @@ class RenameRequest(BaseModel):
 
 
 @router.post("/{profile_id}/duplicate", response_model=Profile, status_code=201)
+@_handle_errors
 def duplicate_profile(profile_id: str, req: DuplicateRequest):
-    try:
-        return profile_service.duplicate_profile(profile_id, req.name, req.message_type, req.trigger_event)
-    except FileNotFoundError as e:
-        _not_found(e)
-    except ValueError as e:
-        _conflict(e)
+    return profile_service.duplicate_profile(profile_id, req.name, req.message_type, req.trigger_event)
 
 
 @router.post("/{profile_id}/rename", response_model=Profile)
+@_handle_errors
 def rename_profile(profile_id: str, req: RenameRequest):
-    try:
-        return profile_service.rename_profile(profile_id, req.name, req.message_type, req.trigger_event)
-    except FileNotFoundError as e:
-        _not_found(e)
-    except ValueError as e:
-        _conflict(e)
+    return profile_service.rename_profile(profile_id, req.name, req.message_type, req.trigger_event)
 
 
 @router.get("/{profile_id}/export")
+@_handle_errors
 def export_profile(profile_id: str):
-    try:
-        yaml_content = profile_service.get_profile_yaml(profile_id)
-    except FileNotFoundError as e:
-        _not_found(e)
+    yaml_content = profile_service.get_profile_yaml(profile_id)
     return Response(
         content=yaml_content,
         media_type="application/x-yaml",
@@ -141,29 +138,21 @@ def export_profile(profile_id: str):
 # ---------------------------------------------------------------------------
 
 @router.post("/{profile_id}/segments", response_model=Profile)
+@_handle_errors
 def add_segment(profile_id: str, req: SegmentAddRequest):
-    try:
-        return profile_service.add_segment(profile_id, req)
-    except FileNotFoundError as e:
-        _not_found(e)
-    except ValueError as e:
-        _conflict(e)
+    return profile_service.add_segment(profile_id, req)
 
 
 @router.put("/{profile_id}/segments/{segment_name}", response_model=Profile)
+@_handle_errors
 def update_segment(profile_id: str, segment_name: str, req: SegmentUpdateRequest):
-    try:
-        return profile_service.update_segment(profile_id, segment_name, req)
-    except FileNotFoundError as e:
-        _not_found(e)
+    return profile_service.update_segment(profile_id, segment_name, req)
 
 
 @router.delete("/{profile_id}/segments/{segment_name}", response_model=Profile)
+@_handle_errors
 def delete_segment(profile_id: str, segment_name: str):
-    try:
-        return profile_service.delete_segment(profile_id, segment_name)
-    except FileNotFoundError as e:
-        _not_found(e)
+    return profile_service.delete_segment(profile_id, segment_name)
 
 
 class MoveSegmentRequest(BaseModel):
@@ -171,13 +160,9 @@ class MoveSegmentRequest(BaseModel):
 
 
 @router.post("/{profile_id}/segments/{segment_name}/move", response_model=Profile)
+@_handle_errors
 def move_segment(profile_id: str, segment_name: str, req: MoveSegmentRequest):
-    try:
-        return profile_service.move_segment(profile_id, segment_name, req.direction)
-    except FileNotFoundError as e:
-        _not_found(e)
-    except ValueError as e:
-        _conflict(e)
+    return profile_service.move_segment(profile_id, segment_name, req.direction)
 
 
 # ---------------------------------------------------------------------------
@@ -185,28 +170,22 @@ def move_segment(profile_id: str, segment_name: str, req: MoveSegmentRequest):
 # ---------------------------------------------------------------------------
 
 @router.post("/{profile_id}/segments/{segment_name}/fields", response_model=Profile)
+@_handle_errors
 def upsert_field(profile_id: str, segment_name: str, req: FieldUpsertRequest):
-    try:
-        return profile_service.upsert_field(profile_id, segment_name, req)
-    except FileNotFoundError as e:
-        _not_found(e)
+    return profile_service.upsert_field(profile_id, segment_name, req)
 
 
 @router.put("/{profile_id}/segments/{segment_name}/fields/{seq}", response_model=Profile)
+@_handle_errors
 def update_field(profile_id: str, segment_name: str, seq: int, req: FieldUpsertRequest):
     req.seq = seq
-    try:
-        return profile_service.upsert_field(profile_id, segment_name, req)
-    except FileNotFoundError as e:
-        _not_found(e)
+    return profile_service.upsert_field(profile_id, segment_name, req)
 
 
 @router.delete("/{profile_id}/segments/{segment_name}/fields/{seq}", response_model=Profile)
+@_handle_errors
 def delete_field(profile_id: str, segment_name: str, seq: int):
-    try:
-        return profile_service.delete_field(profile_id, segment_name, seq)
-    except FileNotFoundError as e:
-        _not_found(e)
+    return profile_service.delete_field(profile_id, segment_name, seq)
 
 
 # ---------------------------------------------------------------------------
@@ -214,32 +193,18 @@ def delete_field(profile_id: str, segment_name: str, seq: int):
 # ---------------------------------------------------------------------------
 
 @router.get("/{profile_id}/value-sets", response_model=dict[str, ValueSet])
+@_handle_errors
 def list_value_sets(profile_id: str):
-    try:
-        return profile_service.list_value_sets(profile_id)
-    except FileNotFoundError as e:
-        _not_found(e)
+    return profile_service.list_value_sets(profile_id)
 
 
 @router.post("/{profile_id}/value-sets/{vs_name}", response_model=Profile)
+@_handle_errors
 def upsert_value_set(profile_id: str, vs_name: str, req: ValueSetUpsertRequest):
-    try:
-        return profile_service.upsert_value_set(profile_id, vs_name, req)
-    except FileNotFoundError as e:
-        _not_found(e)
-
-
-@router.put("/{profile_id}/value-sets/{vs_name}", response_model=Profile)
-def update_value_set(profile_id: str, vs_name: str, req: ValueSetUpsertRequest):
-    try:
-        return profile_service.upsert_value_set(profile_id, vs_name, req)
-    except FileNotFoundError as e:
-        _not_found(e)
+    return profile_service.upsert_value_set(profile_id, vs_name, req)
 
 
 @router.delete("/{profile_id}/value-sets/{vs_name}", response_model=Profile)
+@_handle_errors
 def delete_value_set(profile_id: str, vs_name: str):
-    try:
-        return profile_service.delete_value_set(profile_id, vs_name)
-    except FileNotFoundError as e:
-        _not_found(e)
+    return profile_service.delete_value_set(profile_id, vs_name)

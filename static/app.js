@@ -879,6 +879,8 @@ function profileEditor() {
     validatorMessage: '',
     validationResult: null,
     validating: false,
+    batchResult: null,
+    batchExpandedIdx: null,
 
     get validatorProfiles() { return this.profiles; },
 
@@ -894,26 +896,79 @@ function profileEditor() {
       return Object.entries(map).map(([seg, issues]) => ({ seg, issues }));
     },
 
-    async runValidation() {
-      if (!this.validatorProfileId) { this.toast('Select a profile first', 'error'); return; }
-      if (!this.validatorMessage.trim()) { this.toast('Paste an HL7 message first', 'error'); return; }
-      this.validating = true;
-      this.validationResult = null;
-      try {
-        this.validationResult = await api.post('/api/validate/', {
-          profile_id: this.validatorProfileId,
-          message: this.validatorMessage,
-        });
-      } catch (e) {
-        this.toast(e.message, 'error');
-      } finally {
-        this.validating = false;
-      }
-    },
-
     clearValidator() {
       this.validatorMessage = '';
       this.validationResult = null;
+      this.batchResult = null;
+      this.batchExpandedIdx = null;
+    },
+
+    // Split textarea/file content into individual HL7 messages
+    _splitMessages(text) {
+      return text
+        .split(/\n[ \t]*\n/)          // one or more blank lines as separator
+        .map(b => b.trim())
+        .filter(b => b.length > 0);
+    },
+
+    async runValidation() {
+      if (!this.validatorProfileId) { this.toast('Select a profile first', 'error'); return; }
+      if (!this.validatorMessage.trim()) { this.toast('Paste an HL7 message first', 'error'); return; }
+
+      const messages = this._splitMessages(this.validatorMessage);
+
+      if (messages.length > 1) {
+        // Batch mode
+        this.validating = true;
+        this.validationResult = null;
+        this.batchResult = null;
+        this.batchExpandedIdx = null;
+        try {
+          this.batchResult = await api.post('/api/validate/batch', {
+            profile_id: this.validatorProfileId,
+            messages,
+          });
+        } catch (e) {
+          this.toast(e.message, 'error');
+        } finally {
+          this.validating = false;
+        }
+      } else {
+        // Single mode (original behaviour)
+        this.validating = true;
+        this.validationResult = null;
+        this.batchResult = null;
+        try {
+          this.validationResult = await api.post('/api/validate/', {
+            profile_id: this.validatorProfileId,
+            message: this.validatorMessage,
+          });
+        } catch (e) {
+          this.toast(e.message, 'error');
+        } finally {
+          this.validating = false;
+        }
+      }
+    },
+
+    loadFileMessages(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        this.validatorMessage = e.target.result;
+        this.validationResult = null;
+        this.batchResult = null;
+        this.batchExpandedIdx = null;
+        this.toast(`File loaded: ${file.name}`, 'success');
+      };
+      reader.readAsText(file);
+      // reset so same file can be reloaded
+      event.target.value = '';
+    },
+
+    toggleBatchExpand(idx) {
+      this.batchExpandedIdx = this.batchExpandedIdx === idx ? null : idx;
     },
 
     // ---- Backup / Restore ----

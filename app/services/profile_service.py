@@ -37,6 +37,12 @@ def _today() -> str:
     return str(date.today())
 
 
+def _generate_profile_id(message_type: str, trigger_event: str, name: str | None = None) -> str:
+    base = f"{message_type}_{trigger_event}"
+    suffix = f"_{name.strip().replace(' ', '_')}" if name and name.strip() else ""
+    return f"{base}{suffix}"
+
+
 def _serialize(profile: Profile) -> dict:
     return profile.model_dump(mode="json", exclude_none=False)
 
@@ -122,9 +128,7 @@ def get_profile_yaml(profile_id: str) -> str:
 
 
 def create_profile(req: ProfileCreateRequest) -> Profile:
-    base = f"{req.message_type}_{req.trigger_event}"
-    suffix = f"_{req.name.strip().replace(' ', '_')}" if req.name and req.name.strip() else ""
-    profile_id = f"{base}{suffix}"
+    profile_id = _generate_profile_id(req.message_type, req.trigger_event, req.name)
     if db.exists(profile_id):
         raise ValueError(f"Profile '{profile_id}' already exists")
     today = _today()
@@ -147,8 +151,8 @@ def duplicate_profile(source_id: str, new_name: str, message_type: str = None, t
     source = _load(source_id)
     msg_type = (message_type or source.profile.message_type).strip().upper()
     trig = (trigger_event or source.profile.trigger_event).strip().upper()
-    suffix = f"_{new_name.strip().replace(' ', '_')}" if new_name and new_name.strip() else "_copy"
-    new_id = f"{msg_type}_{trig}{suffix}"
+    effective_name = new_name.strip() if new_name and new_name.strip() else None
+    new_id = _generate_profile_id(msg_type, trig, effective_name) if effective_name else f"{msg_type}_{trig}_copy"
     if db.exists(new_id):
         raise ValueError(f"Profile '{new_id}' already exists")
     import copy
@@ -166,8 +170,7 @@ def rename_profile(profile_id: str, new_name: str, message_type: str = None, tri
     profile = _load(profile_id)
     msg_type = (message_type or profile.profile.message_type).strip().upper()
     trig = (trigger_event or profile.profile.trigger_event).strip().upper()
-    suffix = f"_{new_name.strip().replace(' ', '_')}" if new_name and new_name.strip() else ""
-    new_id = f"{msg_type}_{trig}{suffix}"
+    new_id = _generate_profile_id(msg_type, trig, new_name)
     if new_id != profile_id and db.exists(new_id):
         raise ValueError(f"Profile '{new_id}' already exists")
     db.delete(profile_id)

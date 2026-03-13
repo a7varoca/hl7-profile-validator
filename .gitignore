@@ -29,3 +29,7 @@ Thumbs.db
 
 # HL7 Standard cache
 hl7standard_cache/
+
+profiles.db
+docker-compose.traefik.yml
+run.txt

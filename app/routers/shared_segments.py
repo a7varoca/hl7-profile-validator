@@ -42,20 +42,7 @@ def save_from_profile(profile_id: str, segment_name: str, req: SaveSharedRequest
     if seg_def is None:
         raise HTTPException(status_code=404, detail=f"Segment '{segment_name}' not found in profile")
 
-    # Collect only value_sets referenced by this segment (fields + components)
-    referenced_vs: set[str] = set()
-    def _collect_vs(fields):
-        for f in fields:
-            if f.value_set:
-                referenced_vs.add(f.value_set)
-            for c in f.components:
-                if c.value_set:
-                    referenced_vs.add(c.value_set)
-                for sc in c.components:
-                    if sc.value_set:
-                        referenced_vs.add(sc.value_set)
-    _collect_vs(seg_def.fields)
-
+    referenced_vs = shared_segment_service.collect_referenced_value_sets(seg_def)
     vs_to_save = {k: v for k, v in profile.value_sets.items() if k in referenced_vs}
 
     try:
